@@ -1013,7 +1013,7 @@ export default {
         cfApiTokenConfiguredPlaceholder: 'Saved — leave empty to keep the current token',
         cfApiTokenHint: 'The token is stored server-side only; leaving it empty keeps the stored value.',
         cfFrom: 'Sender address',
-        cfFromPlaceholder: 'api@xgwise.com',
+        cfFromPlaceholder: "api{'@'}xgwise.com",
         cfFromHint: 'Must be on a domain verified for Email Sending, otherwise Cloudflare returns 10202 email.invalid.',
         description: 'Configure email sending for verification codes',
         testConnection: 'Test Connection',

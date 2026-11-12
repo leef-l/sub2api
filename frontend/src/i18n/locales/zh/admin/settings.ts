@@ -1008,7 +1008,7 @@ export default {
         cfApiTokenConfiguredPlaceholder: '已保存，留空表示不修改',
         cfApiTokenHint: '令牌只存服务端；留空保存会保留原值。',
         cfFrom: '发件地址',
-        cfFromPlaceholder: 'api@xgwise.com',
+        cfFromPlaceholder: "api{'@'}xgwise.com",
         cfFromHint: '必须是 Cloudflare Email Sending 里已验证（onboard）的域名，否则会返回 10202 email.invalid。',
         description: '配置用于发送验证码的邮件服务',
         testConnection: '测试连接',
