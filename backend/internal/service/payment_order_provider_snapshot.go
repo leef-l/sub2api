@@ -178,7 +178,7 @@ func validateProviderSnapshotMetadata(order *dbent.PaymentOrder, providerKey str
 				return fmt.Errorf("alipay app_id mismatch: expected %s, got %s", expected, actual)
 			}
 		}
-	case payment.TypeEasyPay:
+	case payment.TypeEasyPay, payment.TypeBepusdt:
 		if expected := strings.TrimSpace(snapshot.MerchantID); expected != "" {
 			actual := strings.TrimSpace(metadata["pid"])
 			if actual == "" {

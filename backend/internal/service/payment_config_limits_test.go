@@ -537,3 +537,221 @@ func TestGetAvailableMethodLimitsPreservesLegacyCrossProviderBehaviorWhenVisible
 	require.Equal(t, 10.0, resp.GlobalMin)
 	require.Equal(t, 400.0, resp.GlobalMax)
 }
+
+func TestPcInstancePaymentCurrencyBEpusdt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{name: "configured USD", config: `{"currency":"USD"}`, want: "USD"},
+		{name: "normalized currency", config: `{"currency":" usd "}`, want: "USD"},
+		{name: "configured CNY", config: `{"currency":"CNY"}`, want: "CNY"},
+		{name: "configured HKD", config: `{"currency":"HKD"}`, want: "HKD"},
+		{name: "missing currency defaults to USD", config: `{}`, want: "USD"},
+		{name: "empty currency defaults to USD", config: `{"currency":" "}`, want: "USD"},
+		{name: "invalid currency defaults to USD", config: `{"currency":"USDT"}`, want: "USD"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			svc := &PaymentConfigService{}
+			inst := makeInstance(4, payment.TypeBepusdt, "usdt_trc20", "")
+			inst.Config = tt.config
+			require.Equal(t, tt.want, svc.pcInstancePaymentCurrency(inst))
+		})
+	}
+}
+
+func TestGetAvailableMethodLimitsBEpusdtUsesConfiguredCurrency(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	_, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeBepusdt).
+		SetName("BEpusdt USD").
+		SetConfig(`{"currency":"USD","customMethods":"[{\"type\":\"usdt_trc20\",\"displayName\":\"USDT TRC20\"}]"}`).
+		SetSupportedTypes("usdt_trc20").
+		SetLimits(`{"usdt_trc20":{"singleMin":1,"singleMax":100}}`).
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, err = client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeEasyPay).
+		SetName("EasyPay CNY").
+		SetConfig(`{"currency":"USD"}`).
+		SetSupportedTypes(payment.TypeAlipay).
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentConfigService{entClient: client}
+	resp, err := svc.GetAvailableMethodLimits(ctx)
+	require.NoError(t, err)
+	require.Contains(t, resp.Methods, "usdt_trc20")
+	require.Equal(t, "USD", resp.Methods["usdt_trc20"].Currency)
+	require.Equal(t, "USDT TRC20", resp.Methods["usdt_trc20"].DisplayName)
+	require.Equal(t, 1.0, resp.Methods["usdt_trc20"].SingleMin)
+	require.Equal(t, 100.0, resp.Methods["usdt_trc20"].SingleMax)
+	require.Equal(t, "CNY", resp.Methods[payment.TypeAlipay].Currency, "EasyPay must retain its CNY behavior even with a currency config value")
+
+	currency, err := svc.ValidateMethodCurrencyConsistency(ctx, "usdt_trc20")
+	require.NoError(t, err)
+	require.Equal(t, "USD", currency)
+	currency, err = svc.ValidateMethodCurrencyConsistency(ctx, payment.TypeAlipay)
+	require.NoError(t, err)
+	require.Equal(t, "CNY", currency)
+}
+
+func TestGetAvailableMethodLimitsFiltersUnsupportedCustomInstances(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	_, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeBepusdt).
+		SetName("BEpusdt USD").
+		SetConfig(`{"currency":"USD"}`).
+		SetSupportedTypes("usdt_trc20").
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	// An official provider cannot handle an arbitrary aggregator sub-method;
+	// including it in this group would create a false USD/CNY conflict.
+	_, err = client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeAlipay).
+		SetName("Official Alipay with unrelated supported type").
+		SetConfig(`{}`).
+		SetSupportedTypes("alipay,usdt_trc20").
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentConfigService{entClient: client}
+	resp, err := svc.GetAvailableMethodLimits(ctx)
+	require.NoError(t, err)
+	require.Contains(t, resp.Methods, "usdt_trc20")
+	require.Equal(t, "USD", resp.Methods["usdt_trc20"].Currency)
+	require.Equal(t, "CNY", resp.Methods[payment.TypeAlipay].Currency)
+	currency, err := svc.ValidateMethodCurrencyConsistency(ctx, "usdt_trc20")
+	require.NoError(t, err)
+	require.Equal(t, "USD", currency)
+}
+
+func TestFilterEnabledVisibleMethodInstancesIncludesAggregateCustomTypes(t *testing.T) {
+	t.Parallel()
+
+	easypay := makeInstance(1, payment.TypeEasyPay, "usdt_trc20", "")
+	bepusdt := makeInstance(2, payment.TypeBepusdt, "usdt_trc20", "")
+	official := makeInstance(3, payment.TypeAlipay, "usdt_trc20", "")
+	disabled := makeInstance(4, payment.TypeBepusdt, "usdt_trc20", "")
+	disabled.Enabled = false
+	require.Equal(t, []*dbent.PaymentProviderInstance{easypay, bepusdt}, filterEnabledVisibleMethodInstances(
+		[]*dbent.PaymentProviderInstance{easypay, bepusdt, official, disabled}, "usdt_trc20",
+	))
+}
+
+func TestQuoteRechargeBonusUsesCNYMultiplierOnly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		currency     string
+		wantCredited float64
+	}{
+		{name: "USD face value", currency: "USD", wantCredited: 10},
+		{name: "normalized USD", currency: " usd ", wantCredited: 10},
+		{name: "HKD face value", currency: "HKD", wantCredited: 10},
+		{name: "JPY face value", currency: "JPY", wantCredited: 10},
+		{name: "CNY keeps multiplier", currency: "CNY", wantCredited: 1.4},
+		{name: "normalized CNY keeps multiplier", currency: " cny ", wantCredited: 1.4},
+		{name: "default currency keeps multiplier", currency: "", wantCredited: 1.4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &PaymentConfig{BalanceRechargeMultiplier: 0.14}
+			require.Equal(t, rechargeBonusQuote{PayBase: 10, Credited: tt.wantCredited}, quoteRechargeBonus(cfg, 10, tt.currency))
+			require.Equal(t, 0.14, cfg.BalanceRechargeMultiplier)
+		})
+	}
+}
+
+func TestQuoteRechargeBonusCurrencyMultiplierWithPromotions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		currency string
+		mode     string
+		want     rechargeBonusQuote
+	}{
+		{name: "USD bonus", currency: "USD", mode: RechargeBonusModeBonus, want: rechargeBonusQuote{PayBase: 10, Credited: 12, Bonus: 2, Percent: 20}},
+		{name: "CNY bonus unchanged", currency: "CNY", mode: RechargeBonusModeBonus, want: rechargeBonusQuote{PayBase: 10, Credited: 1.68, Bonus: 0.28, Percent: 20}},
+		{name: "USD discount", currency: "USD", mode: RechargeBonusModeDiscount, want: rechargeBonusQuote{PayBase: 8, Credited: 10, Bonus: 2, Percent: 20}},
+		{name: "CNY discount unchanged", currency: "CNY", mode: RechargeBonusModeDiscount, want: rechargeBonusQuote{PayBase: 8, Credited: 1.4, Bonus: 0.28, Percent: 20}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &PaymentConfig{
+				BalanceRechargeMultiplier: 0.14,
+				RechargeBonusMode:         tt.mode,
+				RechargeBonusTiers:        []RechargeBonusTier{{MinAmount: 10, BonusPercent: 20}},
+			}
+			require.Equal(t, tt.want, quoteRechargeBonus(cfg, 10, tt.currency))
+		})
+	}
+}
+
+func TestBEpusdtBalanceRechargeAmountsUseProviderCurrency(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		provider     string
+		config       string
+		wantCurrency string
+		wantCredited float64
+	}{
+		{name: "BEpusdt USD", provider: payment.TypeBepusdt, config: `{"currency":"USD"}`, wantCurrency: "USD", wantCredited: 10},
+		{name: "BEpusdt defaults to USD", provider: payment.TypeBepusdt, config: `{}`, wantCurrency: "USD", wantCredited: 10},
+		{name: "BEpusdt configured CNY", provider: payment.TypeBepusdt, config: `{"currency":"CNY"}`, wantCurrency: "CNY", wantCredited: 1.4},
+		{name: "EasyPay remains CNY", provider: payment.TypeEasyPay, config: `{"currency":"USD"}`, wantCurrency: "CNY", wantCredited: 1.4},
+		{name: "official Alipay remains CNY", provider: payment.TypeAlipay, config: `{}`, wantCurrency: "CNY", wantCredited: 1.4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			svc := &PaymentConfigService{}
+			inst := makeInstance(4, tt.provider, "usdt_trc20", "")
+			inst.Config = tt.config
+			methodCurrency := svc.pcInstancePaymentCurrency(inst)
+			require.Equal(t, tt.wantCurrency, methodCurrency)
+			cfg, err := svc.decryptConfig(inst.Config)
+			require.NoError(t, err)
+			sel := &payment.InstanceSelection{InstanceID: "4", ProviderKey: tt.provider, Config: cfg, SupportedTypes: "usdt_trc20"}
+			providerCurrency := paymentProviderConfigCurrency(sel.ProviderKey, sel.Config)
+			require.Equal(t, methodCurrency, providerCurrency)
+
+			quote := quoteRechargeBonus(&PaymentConfig{BalanceRechargeMultiplier: 0.14}, 10, providerCurrency)
+			require.Equal(t, tt.wantCredited, quote.Credited)
+			payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(quote.PayBase, 0, providerCurrency, payment.OrderTypeBalance, 7)
+			require.NoError(t, err)
+			require.Equal(t, "10.00", payAmountStr)
+			require.Equal(t, 10.0, payAmount)
+			req := CreateOrderRequest{PaymentType: "usdt_trc20", OrderType: payment.OrderTypeBalance}
+			providerReq := buildProviderCreatePaymentRequest(req, sel, "test-only", payAmountStr, "test-only")
+			require.Equal(t, "10.00", providerReq.Amount)
+
+			if tt.provider == payment.TypeBepusdt {
+				snapshot := buildPaymentOrderProviderSnapshot(sel, req)
+				require.Equal(t, tt.wantCurrency, snapshot["currency"])
+				require.Equal(t, tt.wantCurrency, PaymentOrderCurrency(&dbent.PaymentOrder{ProviderSnapshot: snapshot}))
+			}
+		})
+	}
+}

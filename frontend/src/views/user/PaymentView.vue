@@ -64,7 +64,7 @@
                 :max="globalMaxAmount"
                 :bonus-tiers="rechargeBonusTiers"
                 :bonus-mode="rechargeBonusMode"
-                :multiplier="balanceRechargeMultiplier"
+                :multiplier="effectiveRechargeMultiplier"
                 :currency="selectedCurrency"
               />
               <p v-if="amountError" class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ amountError }}</p>
@@ -102,8 +102,8 @@
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
                   <span :class="bonusQuote.percent > 0 ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-900 dark:text-white'">${{ creditedAmount.toFixed(2) }}</span>
                 </div>
-                <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
-                  {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: formatBalanceRechargeMultiplier(balanceRechargeMultiplier) }) }}
+                <p v-if="effectiveRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
+                  {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: formatBalanceRechargeMultiplier(effectiveRechargeMultiplier) }) }}
                 </p>
               </div>
             </div>
@@ -614,6 +614,11 @@ const globalMaxAmount = computed(() => {
 // Selected method's limits (for validation and error messages)
 const selectedLimit = computed(() => visibleMethods.value[selectedMethod.value])
 const selectedCurrency = computed(() => normalizePaymentCurrency(selectedLimit.value?.currency))
+// The global multiplier converts CNY to USD; other payment currencies credit 1:1.
+const effectiveRechargeMultiplier = computed(() => {
+  if (!selectedLimit.value) return balanceRechargeMultiplier.value
+  return selectedCurrency.value.toUpperCase() === 'CNY' ? balanceRechargeMultiplier.value : 1
+})
 const localeCode = computed(() => {
   const raw = i18n.locale as unknown
   if (typeof raw === 'string') return raw
@@ -663,7 +668,7 @@ function formatSelectedSubscriptionPaymentAmount(value: number): string {
 // 充值优惠：阈值按输入金额命中；赠金模式按到账基数（输入 × 倍率）加赠送，折扣模式按百分比减实付。
 // 与后端 quoteRechargeBonus 一致；渠道限额、手续费、实付都按折后基数（payBaseAmount）计算，提交仍发送输入金额。
 const bonusQuote = computed(() => quoteRechargeBonus(rechargeBonusTiers.value, validAmount.value, {
-  multiplier: balanceRechargeMultiplier.value,
+  multiplier: effectiveRechargeMultiplier.value,
   mode: rechargeBonusMode.value,
   currencyDigits: currencyFractionDigits(selectedCurrency.value),
 }))
@@ -671,7 +676,7 @@ const payBaseAmount = computed(() => bonusQuote.value.payBase)
 const discountAmount = computed(() => roundPaymentAmount(validAmount.value - payBaseAmount.value, selectedCurrency.value))
 const creditedAmount = computed(() => bonusQuote.value.credited)
 const showBonusRow = computed(() => bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
-const showCreditedBalance = computed(() => balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
+const showCreditedBalance = computed(() => effectiveRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
   enabledMethods.value.map((type) => {

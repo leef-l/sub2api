@@ -14,6 +14,14 @@ func paymentProviderConfigCurrency(providerKey string, cfg map[string]string) st
 		if err == nil {
 			return currency
 		}
+	case payment.TypeBepusdt:
+		// BEpusdt quotes USDT payments in USD unless the instance specifies another fiat currency.
+		if raw := strings.TrimSpace(cfg["currency"]); raw != "" {
+			if currency, err := payment.NormalizePaymentCurrency(raw); err == nil {
+				return currency
+			}
+		}
+		return "USD"
 	}
 	return payment.DefaultPaymentCurrency
 }

@@ -90,6 +90,13 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		selectedCurrency = paymentProviderConfigCurrency(sel.ProviderKey, sel.Config)
 	}
 	if selectedCurrency != methodCurrency {
+		// Requote the USD credit as well as the gateway amount using the selected payment currency.
+		if plan == nil && req.OrderType == payment.OrderTypeBalance {
+			quote := quoteRechargeBonus(cfg, req.Amount, selectedCurrency)
+			limitAmount = quote.PayBase
+			bonusAmount = quote.Bonus
+			orderAmount = quote.Credited
+		}
 		payAmountStr, payAmount, err = calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate, selectedCurrency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
 		if err != nil {
 			return nil, err
@@ -302,12 +309,12 @@ func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req Creat
 			snapshot["merchant_app_id"] = merchantAppID
 		}
 	}
-	if providerKey == payment.TypeEasyPay {
+	if providerKey == payment.TypeEasyPay || providerKey == payment.TypeBepusdt {
 		if merchantID := strings.TrimSpace(sel.Config["pid"]); merchantID != "" {
 			snapshot["merchant_id"] = merchantID
 		}
 	}
-	if providerKey == payment.TypeStripe {
+	if providerKey == payment.TypeBepusdt || providerKey == payment.TypeStripe {
 		snapshot["currency"] = paymentProviderConfigCurrency(providerKey, sel.Config)
 	}
 	if providerKey == payment.TypeAirwallex {

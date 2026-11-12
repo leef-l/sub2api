@@ -24,6 +24,7 @@ const (
 	SettingEnabledPaymentTypes = "ENABLED_PAYMENT_TYPES"
 	SettingLoadBalanceStrategy = "LOAD_BALANCE_STRATEGY"
 	SettingBalancePayDisabled  = "BALANCE_PAYMENT_DISABLED"
+	// SettingBalanceRechargeMult is the USD balance credited per 1 CNY payment; non-CNY methods use face value.
 	SettingBalanceRechargeMult = "BALANCE_RECHARGE_MULTIPLIER"
 	// SettingSubscriptionUSDToCNYRate 是订阅 CNY 换算汇率（1 USD = X CNY）。
 	// 0/未配置 = 关闭换算（订阅按 price 数值直付），显式配置后 CNY 通道订阅按 price × rate 收款。
@@ -577,7 +578,7 @@ func buildVisibleMethodSourceAvailability(instances []*dbent.PaymentProviderInst
 			if inst.SupportedTypes == "" || payment.InstanceSupportsType(inst.SupportedTypes, payment.TypeWxpay) || payment.InstanceSupportsType(inst.SupportedTypes, payment.TypeWxpayDirect) {
 				available[VisibleMethodSourceOfficialWechat] = true
 			}
-		case payment.TypeEasyPay:
+		case payment.TypeEasyPay, payment.TypeBepusdt:
 			for _, supportedType := range splitTypes(inst.SupportedTypes) {
 				switch NormalizeVisibleMethod(supportedType) {
 				case payment.TypeAlipay:
