@@ -137,19 +137,28 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 	if req.SMTPFromName == "" && savedConfig != nil {
 		req.SMTPFromName = savedConfig.FromName
 	}
-	if req.SMTPHost == "" {
-		response.BadRequest(c, "SMTP host is required")
-		return
-	}
-
-	config := &service.SMTPConfig{
-		Host:     req.SMTPHost,
-		Port:     req.SMTPPort,
-		Username: req.SMTPUsername,
-		Password: password,
-		From:     req.SMTPFrom,
-		FromName: req.SMTPFromName,
-		UseTLS:   resolveSMTPUseTLS(req.SMTPUseTLS, savedConfig),
+	// Cloudflare 通道没有 SMTP host，直接用已保存的通道配置发测试信。
+	var config *service.SMTPConfig
+	if req.SMTPHost == "" && savedConfig != nil && savedConfig.Provider == service.EmailProviderCloudflare {
+		cfConfig := *savedConfig
+		if req.SMTPFrom != "" {
+			cfConfig.From = req.SMTPFrom
+		}
+		config = &cfConfig
+	} else {
+		if req.SMTPHost == "" {
+			response.BadRequest(c, "SMTP host is required")
+			return
+		}
+		config = &service.SMTPConfig{
+			Host:     req.SMTPHost,
+			Port:     req.SMTPPort,
+			Username: req.SMTPUsername,
+			Password: password,
+			From:     req.SMTPFrom,
+			FromName: req.SMTPFromName,
+			UseTLS:   resolveSMTPUseTLS(req.SMTPUseTLS, savedConfig),
+		}
 	}
 
 	siteName := h.settingService.GetSiteName(c.Request.Context())

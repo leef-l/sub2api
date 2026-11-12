@@ -204,6 +204,14 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeySMTPFromName] = settings.SMTPFromName
 	updates[SettingKeySMTPUseTLS] = strconv.FormatBool(settings.SMTPUseTLS)
 
+	// 发信通道：留空按 smtp 处理；cloudflare 通道的三个值同样支持"留空保留原值"。
+	updates[SettingKeyEmailProvider] = normalizeEmailProvider(settings.EmailProvider)
+	updates[SettingKeyCFAccountID] = strings.TrimSpace(settings.CFAccountID)
+	if strings.TrimSpace(settings.CFAPIToken) != "" {
+		updates[SettingKeyCFAPIToken] = strings.TrimSpace(settings.CFAPIToken)
+	}
+	updates[SettingKeyCFFrom] = strings.TrimSpace(settings.CFFrom)
+
 	// Cloudflare Turnstile 设置（只有非空才更新密钥）
 	updates[SettingKeyTurnstileEnabled] = strconv.FormatBool(settings.TurnstileEnabled)
 	updates[SettingKeyTurnstileSiteKey] = settings.TurnstileSiteKey

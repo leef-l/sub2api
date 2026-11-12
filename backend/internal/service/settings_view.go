@@ -39,6 +39,13 @@ type SystemSettings struct {
 	SMTPFromName           string
 	SMTPUseTLS             bool
 
+	// 发信通道：smtp | cloudflare
+	EmailProvider        string
+	CFAccountID          string
+	CFAPIToken           string
+	CFAPITokenConfigured bool
+	CFFrom               string
+
 	TurnstileEnabled                       bool
 	TurnstileSiteKey                       string
 	TurnstileSecretKey                     string

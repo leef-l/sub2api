@@ -8498,6 +8498,7 @@
                 </p>
               </div>
               <button
+                v-if="form.email_provider !== 'cloudflare'"
                 type="button"
                 @click="testSmtpConnection"
                 :disabled="testingSmtp || loadFailed"
@@ -8531,7 +8532,46 @@
               </button>
             </div>
             <div class="space-y-6 p-6">
-              <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div>
+                <label
+                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  {{ t("admin.settings.smtp.provider") }}
+                </label>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    :class="
+                      form.email_provider === 'cloudflare'
+                        ? 'btn-secondary'
+                        : 'btn-primary'
+                    "
+                    @click="form.email_provider = 'smtp'"
+                  >
+                    {{ t("admin.settings.smtp.providerSmtp") }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    :class="
+                      form.email_provider === 'cloudflare'
+                        ? 'btn-primary'
+                        : 'btn-secondary'
+                    "
+                    @click="form.email_provider = 'cloudflare'"
+                  >
+                    {{ t("admin.settings.smtp.providerCloudflare") }}
+                  </button>
+                </div>
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.smtp.providerHint") }}
+                </p>
+              </div>
+              <div
+                v-if="form.email_provider !== 'cloudflare'"
+                class="grid grid-cols-1 gap-6 md:grid-cols-2"
+              >
                 <div>
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -8630,8 +8670,66 @@
                 </div>
               </div>
 
+              <div
+                v-if="form.email_provider === 'cloudflare'"
+                class="grid grid-cols-1 gap-6"
+              >
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.smtp.cfAccountId") }}
+                  </label>
+                  <input
+                    v-model="form.cf_account_id"
+                    type="text"
+                    class="input"
+                    :placeholder="t('admin.settings.smtp.cfAccountIdPlaceholder')"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.smtp.cfApiToken") }}
+                  </label>
+                  <input
+                    v-model="form.cf_api_token"
+                    type="password"
+                    class="input"
+                    autocomplete="new-password"
+                    spellcheck="false"
+                    :placeholder="
+                      form.cf_api_token_configured
+                        ? t('admin.settings.smtp.cfApiTokenConfiguredPlaceholder')
+                        : t('admin.settings.smtp.cfApiTokenPlaceholder')
+                    "
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.smtp.cfApiTokenHint") }}
+                  </p>
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.smtp.cfFrom") }}
+                  </label>
+                  <input
+                    v-model="form.cf_from"
+                    type="email"
+                    class="input"
+                    :placeholder="t('admin.settings.smtp.cfFromPlaceholder')"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.smtp.cfFromHint") }}
+                  </p>
+                </div>
+              </div>
+
               <!-- Use TLS Toggle -->
               <div
+                v-if="form.email_provider !== 'cloudflare'"
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div>
@@ -9861,6 +9959,11 @@ const form = reactive<SettingsForm>({
   smtp_from_email: "",
   smtp_from_name: "",
   smtp_use_tls: true,
+  email_provider: "smtp",
+  cf_account_id: "",
+  cf_api_token: "",
+  cf_api_token_configured: false,
+  cf_from: "",
   // Cloudflare Turnstile
   turnstile_enabled: false,
   turnstile_site_key: "",
@@ -11525,6 +11628,10 @@ async function saveSettings() {
       smtp_from_email: form.smtp_from_email,
       smtp_from_name: form.smtp_from_name,
       smtp_use_tls: form.smtp_use_tls,
+      email_provider: form.email_provider,
+      cf_account_id: form.cf_account_id,
+      cf_api_token: form.cf_api_token || undefined,
+      cf_from: form.cf_from,
       turnstile_enabled: form.turnstile_enabled,
       turnstile_site_key: form.turnstile_site_key,
       turnstile_secret_key: form.turnstile_secret_key || undefined,

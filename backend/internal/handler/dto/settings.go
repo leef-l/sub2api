@@ -58,6 +58,12 @@ type SystemSettings struct {
 	SMTPFromName           string `json:"smtp_from_name"`
 	SMTPUseTLS             bool   `json:"smtp_use_tls"`
 
+	// 发信通道：smtp | cloudflare
+	EmailProvider        string `json:"email_provider"`
+	CFAccountID          string `json:"cf_account_id"`
+	CFAPITokenConfigured bool   `json:"cf_api_token_configured"`
+	CFFrom               string `json:"cf_from"`
+
 	TurnstileEnabled                       bool     `json:"turnstile_enabled"`
 	TurnstileSiteKey                       string   `json:"turnstile_site_key"`
 	TurnstileSecretKeyConfigured           bool     `json:"turnstile_secret_key_configured"`

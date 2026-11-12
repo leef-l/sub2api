@@ -115,6 +115,14 @@ const (
 	EmailProviderCloudflare = "cloudflare"
 )
 
+// normalizeEmailProvider 归一化发信通道，未知值回落到 smtp。
+func normalizeEmailProvider(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), EmailProviderCloudflare) {
+		return EmailProviderCloudflare
+	}
+	return EmailProviderSMTP
+}
+
 // EmailService 邮件服务
 type EmailService struct {
 	settingRepo              SettingRepository

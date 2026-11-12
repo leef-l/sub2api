@@ -50,6 +50,12 @@ type UpdateSettingsRequest struct {
 	SMTPFromName string `json:"smtp_from_name"`
 	SMTPUseTLS   bool   `json:"smtp_use_tls"`
 
+	// 发信通道：smtp | cloudflare
+	EmailProvider string `json:"email_provider"`
+	CFAccountID   string `json:"cf_account_id"`
+	CFAPIToken    string `json:"cf_api_token"`
+	CFFrom        string `json:"cf_from"`
+
 	// Cloudflare Turnstile 设置
 	TurnstileEnabled   bool   `json:"turnstile_enabled"`
 	TurnstileSiteKey   string `json:"turnstile_site_key"`
@@ -1550,6 +1556,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SMTPFrom:                            req.SMTPFrom,
 		SMTPFromName:                        req.SMTPFromName,
 		SMTPUseTLS:                          req.SMTPUseTLS,
+		EmailProvider:                       req.EmailProvider,
+		CFAccountID:                         req.CFAccountID,
+		CFAPIToken:                          req.CFAPIToken,
+		CFFrom:                              req.CFFrom,
 		TurnstileEnabled:                    req.TurnstileEnabled,
 		TurnstileSiteKey:                    req.TurnstileSiteKey,
 		TurnstileSecretKey:                  req.TurnstileSecretKey,
@@ -2219,6 +2229,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SMTPFrom:                                               updatedSettings.SMTPFrom,
 		SMTPFromName:                                           updatedSettings.SMTPFromName,
 		SMTPUseTLS:                                             updatedSettings.SMTPUseTLS,
+		EmailProvider:                                          updatedSettings.EmailProvider,
+		CFAccountID:                                            updatedSettings.CFAccountID,
+		CFAPITokenConfigured:                                   updatedSettings.CFAPITokenConfigured,
+		CFFrom:                                                 updatedSettings.CFFrom,
 		TurnstileEnabled:                                       updatedSettings.TurnstileEnabled,
 		TurnstileSiteKey:                                       updatedSettings.TurnstileSiteKey,
 		TurnstileSecretKeyConfigured:                           updatedSettings.TurnstileSecretKeyConfigured,
