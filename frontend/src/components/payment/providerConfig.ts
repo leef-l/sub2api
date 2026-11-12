@@ -10,6 +10,8 @@ export interface ConfigFieldDef {
   sensitive: boolean
   optional?: boolean
   clearable?: boolean
+  /** Render as a multi-line textarea (used for PEM certificates / long keys). */
+  multiline?: boolean
   defaultValue?: string
   hintKey?: string
   options?: TypeOption[]
@@ -149,7 +151,10 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
   alipay: [
     { key: 'appId', label: 'App ID', sensitive: false },
     { key: 'privateKey', label: '', sensitive: true },
-    { key: 'publicKey', label: '', sensitive: true },
+    { key: 'publicKey', label: '', sensitive: true, optional: true, multiline: true, hintKey: 'admin.settings.payment.field_alipayPublicKeyHint' },
+    { key: 'appCertPublicKey', label: '', sensitive: true, optional: true, multiline: true, hintKey: 'admin.settings.payment.field_alipayAppCertHint' },
+    { key: 'alipayPublicCert', label: '', sensitive: true, optional: true, multiline: true, hintKey: 'admin.settings.payment.field_alipayPublicCertHint' },
+    { key: 'alipayRootCert', label: '', sensitive: true, optional: true, multiline: true, hintKey: 'admin.settings.payment.field_alipayRootCertHint' },
   ],
   wxpay: [
     { key: 'appId', label: 'App ID', sensitive: false },

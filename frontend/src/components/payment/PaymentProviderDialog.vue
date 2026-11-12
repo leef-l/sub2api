@@ -160,7 +160,7 @@
               <span v-else class="text-red-500"> *</span>
             </label>
             <textarea
-              v-if="field.sensitive && field.key.toLowerCase().includes('key') && field.key !== 'pkey'"
+              v-if="field.multiline || (field.sensitive && field.key.toLowerCase().includes('key') && field.key !== 'pkey')"
               v-model="config[field.key]"
               rows="3"
               class="input font-mono text-xs"

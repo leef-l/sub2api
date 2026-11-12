@@ -113,7 +113,7 @@ var pendingOrderStatuses = []string{
 var providerSensitiveConfigFields = map[string]map[string]struct{}{
 	payment.TypeEasyPay:   {"pkey": {}},
 	payment.TypeBepusdt:   {"pkey": {}},
-	payment.TypeAlipay:    {"privatekey": {}, "publickey": {}, "alipaypublickey": {}},
+	payment.TypeAlipay:    {"privatekey": {}, "publickey": {}, "alipaypublickey": {}, "appcertpublickey": {}, "alipaypubliccert": {}, "alipayrootcert": {}},
 	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}},
 	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}},
 	payment.TypeAirwallex: {"apikey": {}, "webhooksecret": {}},
@@ -126,7 +126,7 @@ var providerSensitiveConfigFields = map[string]map[string]struct{}{
 var providerPendingOrderProtectedConfigFields = map[string]map[string]struct{}{
 	payment.TypeEasyPay:   {"pkey": {}, "pid": {}},
 	payment.TypeBepusdt:   {"pkey": {}, "pid": {}, "currency": {}},
-	payment.TypeAlipay:    {"privatekey": {}, "publickey": {}, "alipaypublickey": {}, "appid": {}},
+	payment.TypeAlipay:    {"privatekey": {}, "publickey": {}, "alipaypublickey": {}, "appid": {}, "appcertpublickey": {}, "alipaypubliccert": {}, "alipayrootcert": {}},
 	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}, "appid": {}, "mpappid": {}, "mchid": {}, "publickeyid": {}, "certserial": {}},
 	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}, "currency": {}},
 	payment.TypeAirwallex: {"clientid": {}, "apikey": {}, "webhooksecret": {}, "apibase": {}, "accountid": {}, "currency": {}},

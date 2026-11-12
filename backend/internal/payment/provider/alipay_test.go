@@ -571,3 +571,49 @@ func TestAlipayQueryRefundErrorsKeepRefundPending(t *testing.T) {
 		t.Fatal("gateway error must be returned so the refund stays pending")
 	}
 }
+
+func TestAlipayCertModeConfigured(t *testing.T) {
+	cases := []struct {
+		name   string
+		config map[string]string
+		want   bool
+	}{
+		{"empty", map[string]string{}, false},
+		{"public key mode", map[string]string{"publicKey": "MIIBIjANBgkqhkiG9w0BAQEF"}, false},
+		{"app cert present", map[string]string{alipayCfgAppCertPublicKey: "x"}, true},
+		{"alipay cert present", map[string]string{alipayCfgAlipayPublicCert: "x"}, true},
+		{"root cert present", map[string]string{alipayCfgAlipayRootCert: "x"}, true},
+		{"legacy cert in publicKey", map[string]string{"publicKey": "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Alipay{config: tc.config}
+			if got := a.certModeConfigured(); got != tc.want {
+				t.Fatalf("certModeConfigured() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeAlipayCertPEM(t *testing.T) {
+	if got, err := normalizeAlipayCertPEM("   ", "app cert"); err != nil || got != "" {
+		t.Fatalf("empty input: got %q, err %v", got, err)
+	}
+	if _, err := normalizeAlipayCertPEM("not-a-certificate", "app cert"); err == nil {
+		t.Fatal("garbage input should return error")
+	}
+}
+
+func TestNormalizeAlipayPublicKey(t *testing.T) {
+	if got := normalizeAlipayPublicKey("  "); got != "" {
+		t.Fatalf("empty input should stay empty, got %q", got)
+	}
+	normalized := normalizeAlipayPublicKey("MIIBIjANBgkqhkiG9w0BAQEF")
+	if !strings.HasPrefix(normalized, "-----BEGIN PUBLIC KEY-----") || !strings.Contains(normalized, "-----END PUBLIC KEY-----") {
+		t.Fatalf("unexpected normalized key: %q", normalized)
+	}
+	raw := "-----BEGIN PUBLIC KEY-----\nABC\n-----END PUBLIC KEY-----"
+	if got := normalizeAlipayPublicKey(raw); got != raw {
+		t.Fatalf("PEM input should pass through unchanged, got %q", got)
+	}
+}

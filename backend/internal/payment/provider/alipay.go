@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -49,10 +51,27 @@ var (
 	}
 )
 
+// 支付宝「公钥证书」模式所需的三张证书配置键。
+// 与开放平台「开发设置 → 接口加签方式 = 公钥证书」一一对应：
+//   - appCertPublicKey  ← 应用公钥证书 appCertPublicKey_<appId>.crt
+//   - alipayPublicCert  ← 支付宝公钥证书 alipayCertPublicKey_RSA2.crt
+//   - alipayRootCert    ← 支付宝根证书 alipayRootCert.crt
+//
+// 三者同时存在时走证书模式：请求会自动带上 app_cert_sn 与 alipay_root_cert_sn，
+// 并用支付宝公钥证书验签；此时不再需要 publicKey（单行支付宝公钥）。
+const (
+	alipayCfgAppCertPublicKey = "appCertPublicKey"
+	alipayCfgAlipayPublicCert = "alipayPublicCert"
+	alipayCfgAlipayRootCert   = "alipayRootCert"
+
+	alipayCertPEMBegin = "-----BEGIN CERTIFICATE-----"
+	alipayCertPEMEnd   = "-----END CERTIFICATE-----"
+)
+
 // Alipay implements payment.Provider and payment.CancelableProvider using the smartwalle/alipay SDK.
 type Alipay struct {
 	instanceID string
-	config     map[string]string // appId, privateKey, publicKey (or alipayPublicKey), notifyUrl, returnUrl
+	config     map[string]string // appId, privateKey, publicKey (or alipayPublicKey), notifyUrl, returnUrl, appCertPublicKey, alipayPublicCert, alipayRootCert
 
 	mu     sync.Mutex
 	client *alipay.Client
@@ -82,6 +101,17 @@ func (a *Alipay) getClient() (*alipay.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("alipay init client: %w", err)
 	}
+
+	// 证书模式优先：三张证书齐全时，请求自动携带 app_cert_sn / alipay_root_cert_sn，
+	// 并用支付宝公钥证书验签，无需再加载单行支付宝公钥。
+	if a.certModeConfigured() {
+		if err := a.applyCertificates(client); err != nil {
+			return nil, err
+		}
+		a.client = client
+		return a.client, nil
+	}
+
 	pubKey := a.config["publicKey"]
 	if pubKey == "" {
 		pubKey = a.config["alipayPublicKey"]
@@ -89,11 +119,115 @@ func (a *Alipay) getClient() (*alipay.Client, error) {
 	if pubKey == "" {
 		return nil, fmt.Errorf("alipay config missing required key: publicKey (or alipayPublicKey)")
 	}
-	if err := client.LoadAliPayPublicKey(pubKey); err != nil {
+	if err := client.LoadAliPayPublicKey(normalizeAlipayPublicKey(pubKey)); err != nil {
 		return nil, fmt.Errorf("alipay load public key: %w", err)
 	}
 	a.client = client
 	return a.client, nil
+}
+
+// certModeConfigured 判断是否启用了「公钥证书」模式。
+// 只要三个证书键中有任意一个非空，就认为用户想走证书模式，
+// 随后会强制校验三张证书齐全，避免静默退化到公钥模式。
+func (a *Alipay) certModeConfigured() bool {
+	for _, key := range []string{alipayCfgAppCertPublicKey, alipayCfgAlipayPublicCert, alipayCfgAlipayRootCert} {
+		if strings.TrimSpace(a.config[key]) != "" {
+			return true
+		}
+	}
+	// 兼容历史配置：旧版本要求把公钥填在 publicKey，用户可能直接把「应用公钥证书」粘在该字段。
+	return strings.Contains(a.config["publicKey"], alipayCertPEMBegin)
+}
+
+// applyCertificates 加载证书模式所需的三张证书。
+func (a *Alipay) applyCertificates(client *alipay.Client) error {
+	appCertRaw := strings.TrimSpace(a.config[alipayCfgAppCertPublicKey])
+	if appCertRaw == "" && strings.Contains(a.config["publicKey"], alipayCertPEMBegin) {
+		appCertRaw = a.config["publicKey"]
+	}
+	appCert, err := normalizeAlipayCertPEM(appCertRaw, "应用公钥证书(appCertPublicKey)")
+	if err != nil {
+		return err
+	}
+	aliCert, err := normalizeAlipayCertPEM(a.config[alipayCfgAlipayPublicCert], "支付宝公钥证书(alipayPublicCert)")
+	if err != nil {
+		return err
+	}
+	rootCert, err := normalizeAlipayCertPEM(a.config[alipayCfgAlipayRootCert], "支付宝根证书(alipayRootCert)")
+	if err != nil {
+		return err
+	}
+
+	if appCert == "" || aliCert == "" || rootCert == "" {
+		return fmt.Errorf("alipay 证书模式需要同时配置 appCertPublicKey(应用公钥证书)、alipayPublicCert(支付宝公钥证书)、alipayRootCert(支付宝根证书)")
+	}
+
+	if err := client.LoadAppCertPublicKey(appCert); err != nil {
+		return fmt.Errorf("alipay load app cert public key: %w", err)
+	}
+	if err := client.LoadAlipayCertPublicKey(aliCert); err != nil {
+		return fmt.Errorf("alipay load alipay public cert: %w", err)
+	}
+	if err := client.LoadAliPayRootCert(rootCert); err != nil {
+		return fmt.Errorf("alipay load alipay root cert: %w", err)
+	}
+	return nil
+}
+
+// normalizeAlipayCertPEM 把用户粘贴的证书规范化为 PEM。
+// 支持：完整 PEM（多张证书链原样保留）、纯 base64 单行/多行。
+func normalizeAlipayCertPEM(raw, fieldName string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	if strings.Contains(trimmed, alipayCertPEMBegin) {
+		if _, err := firstCertificate(trimmed); err != nil {
+			return "", fmt.Errorf("alipay %s 解析失败: %w", fieldName, err)
+		}
+		return trimmed, nil
+	}
+	compact := strings.Join(strings.Fields(trimmed), "")
+	wrapped := wrapBase64PEM(compact, "CERTIFICATE")
+	if _, err := firstCertificate(wrapped); err != nil {
+		return "", fmt.Errorf("alipay %s 格式不正确（应为 .crt 证书内容）: %w", fieldName, err)
+	}
+	return wrapped, nil
+}
+
+// normalizeAlipayPublicKey 兼容单行 base64 与带 PEM 头的支付宝公钥。
+func normalizeAlipayPublicKey(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.Contains(trimmed, "-----BEGIN") {
+		return trimmed
+	}
+	return wrapBase64PEM(strings.Join(strings.Fields(trimmed), ""), "PUBLIC KEY")
+}
+
+func wrapBase64PEM(base64Body, blockType string) string {
+	begin := "-----BEGIN " + blockType + "-----"
+	end := "-----END " + blockType + "-----"
+	var b strings.Builder
+	b.WriteString(begin)
+	b.WriteString("\n")
+	for i := 0; i < len(base64Body); i += 64 {
+		j := i + 64
+		if j > len(base64Body) {
+			j = len(base64Body)
+		}
+		b.WriteString(base64Body[i:j])
+		b.WriteString("\n")
+	}
+	b.WriteString(end)
+	return b.String()
+}
+
+func firstCertificate(pemData string) (*x509.Certificate, error) {
+	block, _ := pem.Decode([]byte(pemData))
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found")
+	}
+	return x509.ParseCertificate(block.Bytes)
 }
 
 func (a *Alipay) Name() string        { return "Alipay" }
