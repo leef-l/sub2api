@@ -50,7 +50,18 @@ func (s *PaymentConfigService) pcApplyEnabledVisibleMethodInstances(ctx context.
 		filtered[paymentType] = groupedInstances
 	}
 
-	for _, method := range []string{payment.TypeAlipay, payment.TypeWxpay} {
+	// Apply the same instance filtering to custom EasyPay/BEpusdt methods as to
+	// Alipay/WeChat, without treating standalone providers (e.g. Stripe) as aggregators.
+	methods := map[string]struct{}{payment.TypeAlipay: {}, payment.TypeWxpay: {}}
+	for _, inst := range instances {
+		if inst == nil {
+			continue
+		}
+		for _, method := range enabledVisibleMethodsForProvider(inst.ProviderKey, inst.SupportedTypes) {
+			methods[method] = struct{}{}
+		}
+	}
+	for method := range methods {
 		matching := filterEnabledVisibleMethodInstances(instances, method)
 		providerKey, err := s.resolveVisibleMethodProviderKey(ctx, method, matching)
 		if err != nil {
@@ -186,7 +197,7 @@ func (s *PaymentConfigService) pcAggregateMethodDisplayName(pt string, instances
 }
 
 func (s *PaymentConfigService) pcInstanceEasyPayCustomMethodDisplayName(inst *dbent.PaymentProviderInstance, pt string) string {
-	if inst == nil || inst.ProviderKey != payment.TypeEasyPay {
+	if inst == nil || (inst.ProviderKey != payment.TypeEasyPay && inst.ProviderKey != payment.TypeBepusdt) {
 		return ""
 	}
 	cfg := map[string]string{}

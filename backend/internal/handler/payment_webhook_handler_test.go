@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/iotest"
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -57,6 +58,13 @@ func TestWriteSuccessResponse(t *testing.T) {
 		{
 			name:            "easypay returns plain text success",
 			providerKey:     "easypay",
+			wantCode:        http.StatusOK,
+			wantContentType: "text/plain",
+			wantBody:        "success",
+		},
+		{
+			name:            "bepusdt returns plain text success",
+			providerKey:     "bepusdt",
 			wantCode:        http.StatusOK,
 			wantContentType: "text/plain",
 			wantBody:        "success",
@@ -161,6 +169,12 @@ func TestExtractOutTradeNo(t *testing.T) {
 			want:        "sub2_123",
 		},
 		{
+			name:        "bepusdt form payload",
+			providerKey: "bepusdt",
+			rawBody:     "pid=merchant_1&out_trade_no=sub2_be_123&status=1&amount=10.00&actual_amount=1.25",
+			want:        "sub2_be_123",
+		},
+		{
 			name:        "alipay query payload",
 			providerKey: "alipay",
 			rawBody:     "notify_time=2026-04-20+12%3A00%3A00&out_trade_no=sub2_456",
@@ -188,43 +202,120 @@ func TestExtractOutTradeNo(t *testing.T) {
 }
 
 func TestVerifyNotificationWithProvidersReturnsMatchedProvider(t *testing.T) {
-	firstErr := errors.New("wrong provider")
-	providers := []payment.Provider{
-		webhookHandlerProviderStub{
-			key:       payment.TypeWxpay,
-			verifyErr: firstErr,
+	tests := []struct {
+		name        string
+		providerKey string
+		rawBody     string
+		headers     map[string]string
+	}{
+		{
+			name:        "wxpay successful callback",
+			providerKey: payment.TypeWxpay,
+			rawBody:     "{}",
+			headers:     map[string]string{"wechatpay-signature": "sig"},
 		},
-		webhookHandlerProviderStub{
-			key: payment.TypeWxpay,
-			notification: &payment.PaymentNotification{
-				OrderID: "sub2_42",
-				TradeNo: "trade-42",
-				Status:  payment.NotificationStatusSuccess,
-			},
+		{
+			name:        "bepusdt successful callback",
+			providerKey: "bepusdt",
+			rawBody:     "out_trade_no=sub2_42&trade_id=trade-42&status=1&sign=valid",
 		},
 	}
 
-	provider, notification, err := verifyNotificationWithProviders(context.Background(), providers, "{}", map[string]string{"wechatpay-signature": "sig"})
-	require.NoError(t, err)
-	require.Equal(t, payment.TypeWxpay, provider.ProviderKey())
-	require.NotNil(t, notification)
-	require.Equal(t, "sub2_42", notification.OrderID)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			firstErr := errors.New("wrong provider")
+			providers := []payment.Provider{
+				webhookHandlerProviderStub{
+					key:       tt.providerKey,
+					verifyErr: firstErr,
+				},
+				webhookHandlerProviderStub{
+					key: tt.providerKey,
+					notification: &payment.PaymentNotification{
+						OrderID: "sub2_42",
+						TradeNo: "trade-42",
+						Status:  payment.NotificationStatusSuccess,
+					},
+				},
+			}
+
+			provider, notification, err := verifyNotificationWithProviders(context.Background(), providers, tt.rawBody, tt.headers)
+			require.NoError(t, err)
+			require.Equal(t, tt.providerKey, provider.ProviderKey())
+			require.NotNil(t, notification)
+			require.Equal(t, "sub2_42", notification.OrderID)
+			require.Equal(t, "trade-42", notification.TradeNo)
+			require.Equal(t, payment.NotificationStatusSuccess, notification.Status)
+		})
+	}
 }
 
 func TestVerifyNotificationWithProvidersFailsWhenAllProvidersReject(t *testing.T) {
-	providers := []payment.Provider{
-		webhookHandlerProviderStub{
-			key:       payment.TypeWxpay,
-			verifyErr: errors.New("verify failed a"),
+	tests := []struct {
+		name        string
+		providerKey string
+		rawBody     string
+		wantError   string
+	}{
+		{
+			name:        "wxpay all providers reject",
+			providerKey: payment.TypeWxpay,
+			rawBody:     "{}",
+			wantError:   "verify failed b",
 		},
-		webhookHandlerProviderStub{
-			key:       payment.TypeWxpay,
-			verifyErr: errors.New("verify failed b"),
+		{
+			name:        "bepusdt invalid signature",
+			providerKey: "bepusdt",
+			rawBody:     "out_trade_no=sub2_42&trade_id=trade-42&status=1&sign=invalid",
+			wantError:   "invalid signature",
 		},
 	}
 
-	_, _, err := verifyNotificationWithProviders(context.Background(), providers, "{}", nil)
-	require.Error(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			providers := []payment.Provider{
+				webhookHandlerProviderStub{
+					key:       tt.providerKey,
+					verifyErr: errors.New("verify failed a"),
+				},
+				webhookHandlerProviderStub{
+					key:       tt.providerKey,
+					verifyErr: errors.New(tt.wantError),
+				},
+			}
+
+			provider, notification, err := verifyNotificationWithProviders(context.Background(), providers, tt.rawBody, nil)
+			require.EqualError(t, err, tt.wantError)
+			require.Nil(t, provider)
+			require.Nil(t, notification)
+		})
+	}
+}
+
+func TestEasyPayCompatibleNotifyReadFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &PaymentWebhookHandler{}
+	tests := []struct {
+		providerKey string
+		notify      gin.HandlerFunc
+	}{
+		{providerKey: "easypay", notify: handler.EasyPayNotify},
+		{providerKey: "bepusdt", notify: handler.BepusdtNotify},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.providerKey, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/payment/webhook/"+tt.providerKey, iotest.ErrReader(errors.New("read failed")))
+			c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			tt.notify(c)
+
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Equal(t, "failed to read body", w.Body.String())
+		})
+	}
 }
 
 type webhookHandlerProviderStub struct {

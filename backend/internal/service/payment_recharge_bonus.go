@@ -271,14 +271,18 @@ type rechargeBonusQuote struct {
 	Percent float64
 }
 
-// quoteRechargeBonus 按配置模式报价。currency 用于折扣模式实付基数的精度。
+// quoteRechargeBonus 按配置模式报价。currency 决定是否应用 CNY 充值倍率，以及折扣实付基数的精度。
 // 未配置阶梯、未命中、或折扣百分比 ≥ 100（非法历史数据，fail-safe）时按无优惠处理。
 func quoteRechargeBonus(cfg *PaymentConfig, paymentAmount float64, currency string) rechargeBonusQuote {
 	multiplier := defaultBalanceRechargeMultiplier
 	var tiers []RechargeBonusTier
 	mode := RechargeBonusModeBonus
 	if cfg != nil {
-		multiplier = cfg.BalanceRechargeMultiplier
+		// BALANCE_RECHARGE_MULTIPLIER 表示 1 CNY 支付兑换的 USD 余额，仅用于 CNY 渠道。
+		// 非 CNY 渠道按面值 1:1 入账；后续汇率或专属费率应新增独立配置，不复用 CNY 倍率。
+		if normalizedCurrency, err := payment.NormalizePaymentCurrency(currency); err == nil && normalizedCurrency == payment.DefaultPaymentCurrency {
+			multiplier = cfg.BalanceRechargeMultiplier
+		}
 		tiers = cfg.RechargeBonusTiers
 		mode, _ = NormalizeRechargeBonusMode(cfg.RechargeBonusMode)
 	}

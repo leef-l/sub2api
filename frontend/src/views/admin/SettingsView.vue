@@ -8338,20 +8338,44 @@
                     t("admin.settings.payment.enabledPaymentTypes")
                   }}</label>
                   <div class="mt-1.5 flex flex-wrap gap-2">
-                    <button
+                    <div
                       v-for="pt in allPaymentTypes"
                       :key="pt.value"
-                      type="button"
-                      @click="togglePaymentType(pt.value)"
                       :class="[
-                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                        'flex items-center rounded-lg border text-sm font-medium transition-all',
                         isPaymentTypeEnabled(pt.value)
                           ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
-                          : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-dark-500',
+                          : 'border-gray-300 bg-white text-gray-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300',
                       ]"
                     >
-                      {{ pt.label }}
-                    </button>
+                      <button
+                        type="button"
+                        class="rounded-l-lg px-3 py-1.5 hover:opacity-80"
+                        :title="t('admin.settings.payment.manageProviders')"
+                        :aria-label="`${t('admin.settings.payment.manageProviders')}: ${pt.label}`"
+                        @click="openProviderManagement(pt.value)"
+                      >
+                        {{ pt.label }}
+                      </button>
+                      <button
+                        type="button"
+                        role="switch"
+                        :aria-checked="isPaymentTypeEnabled(pt.value)"
+                        :aria-label="`${t('common.enabled')}: ${pt.label}`"
+                        :class="[
+                          'relative mr-2 inline-flex h-4 w-7 flex-shrink-0 rounded-full transition-colors',
+                          isPaymentTypeEnabled(pt.value) ? 'bg-white/30' : 'bg-gray-300 dark:bg-dark-600',
+                        ]"
+                        @click="togglePaymentType(pt.value)"
+                      >
+                        <span
+                          :class="[
+                            'pointer-events-none inline-block h-3 w-3 translate-y-0.5 rounded-full bg-white shadow transition-transform',
+                            isPaymentTypeEnabled(pt.value) ? 'translate-x-3.5' : 'translate-x-0.5',
+                          ]"
+                        />
+                      </button>
+                    </div>
                   </div>
                   <p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
                     {{ t("admin.settings.payment.enabledPaymentTypesHint") }}
@@ -12532,6 +12556,7 @@ const allPaymentTypes = computed(() => [
   { value: "wxpay", label: t("payment.methods.wxpay") },
   { value: "stripe", label: t("payment.methods.stripe") },
   { value: "airwallex", label: t("payment.methods.airwallex") },
+  { value: "bepusdt", label: t("payment.methods.bepusdt") },
 ]);
 
 function isPaymentTypeEnabled(type: string): boolean {
@@ -12578,6 +12603,7 @@ const providers = ref<ProviderInstance[]>([]);
 const showProviderDialog = ref(false);
 const showDeleteProviderDialog = ref(false);
 const editingProvider = ref<ProviderInstance | null>(null);
+const creatingProviderKey = ref<string | null>(null);
 const deletingProviderId = ref<number | null>(null);
 const providerDialogRef = ref<InstanceType<
   typeof PaymentProviderDialog
@@ -12585,6 +12611,8 @@ const providerDialogRef = ref<InstanceType<
 
 const providerKeyOptions = computed(() => [
   { value: "easypay", label: t("admin.settings.payment.providerEasypay") },
+
+  { value: "bepusdt", label: t("admin.settings.payment.providerBepusdt") },
   { value: "alipay", label: t("admin.settings.payment.providerAlipay") },
   { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
   { value: "stripe", label: t("admin.settings.payment.providerStripe") },
@@ -12593,7 +12621,9 @@ const providerKeyOptions = computed(() => [
 
 const enabledProviderKeyOptions = computed(() => {
   const enabled = form.payment_enabled_types;
-  return providerKeyOptions.value.filter((opt) => enabled.includes(opt.value));
+  return providerKeyOptions.value.filter(
+    (opt) => enabled.includes(opt.value) || opt.value === creatingProviderKey.value,
+  );
 });
 
 const loadBalanceOptions = computed(() => [
@@ -12670,7 +12700,7 @@ function getProviderVisibleMethods(
         }
       });
     }
-  } else if (provider.provider_key === "easypay") {
+  } else if (provider.provider_key === "easypay" || provider.provider_key === "bepusdt") {
     supportedTypes.forEach(addMethod);
   }
 
@@ -12736,15 +12766,26 @@ async function loadProviders() {
   }
 }
 
-function openCreateProvider() {
+function openProviderManagement(providerKey: string) {
+  const provider = providers.value.find((p) => p.provider_key === providerKey);
+  if (provider) {
+    openEditProvider(provider);
+  } else {
+    openCreateProvider(providerKey);
+  }
+}
+
+function openCreateProvider(providerKey?: string) {
   editingProvider.value = null;
+  creatingProviderKey.value = providerKey || null;
   providerDialogRef.value?.reset(
-    enabledProviderKeyOptions.value[0]?.value || "easypay",
+    providerKey || enabledProviderKeyOptions.value[0]?.value || "easypay",
   );
   showProviderDialog.value = true;
 }
 
 function openEditProvider(provider: ProviderInstance) {
+  creatingProviderKey.value = null;
   editingProvider.value = provider;
   providerDialogRef.value?.loadProvider(provider);
   showProviderDialog.value = true;
@@ -12772,6 +12813,12 @@ async function handleSaveProvider(payload: Partial<ProviderInstance>) {
       await adminAPI.payment.updateProvider(editingProvider.value.id, payload);
     } else {
       await adminAPI.payment.createProvider(payload);
+    }
+    if (candidate.enabled && !isPaymentTypeEnabled(candidate.provider_key)) {
+      form.payment_enabled_types = [
+        ...form.payment_enabled_types,
+        candidate.provider_key,
+      ];
     }
     showProviderDialog.value = false;
     // Reload full list (API returns decrypted/formatted data with correct sort order)
