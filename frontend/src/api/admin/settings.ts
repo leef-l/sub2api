@@ -503,6 +503,11 @@ export interface SystemSettings {
   smtp_from_email: string;
   smtp_from_name: string;
   smtp_use_tls: boolean;
+  /** 发信通道：smtp | cloudflare */
+  email_provider: string;
+  cf_account_id: string;
+  cf_api_token_configured: boolean;
+  cf_from: string;
   // Cloudflare Turnstile settings
   turnstile_enabled: boolean;
   turnstile_site_key: string;
@@ -854,6 +859,10 @@ export interface UpdateSettingsRequest {
   smtp_from_email?: string;
   smtp_from_name?: string;
   smtp_use_tls?: boolean;
+  email_provider?: string;
+  cf_account_id?: string;
+  cf_api_token?: string;
+  cf_from?: string;
   turnstile_enabled?: boolean;
   turnstile_site_key?: string;
   turnstile_secret_key?: string;
