@@ -253,6 +253,13 @@ const (
 	SettingKeySMTPFromName = "smtp_from_name" // 发件人名称
 	SettingKeySMTPUseTLS   = "smtp_use_tls"   // 是否使用TLS
 
+	// 发信通道：smtp（默认）或 cloudflare（Cloudflare Email Service REST API）
+	SettingKeyEmailProvider = "email_provider"
+	// Cloudflare Email Service REST 发信配置
+	SettingKeyCFAccountID = "cf_account_id" // Cloudflare Account ID
+	SettingKeyCFAPIToken  = "cf_api_token"  // API Token（Email Sending: Edit 权限）
+	SettingKeyCFFrom      = "cf_from"       // 发件地址，必须是已 onboard 到 Email Sending 的域名
+
 	// Cloudflare Turnstile 设置
 	SettingKeyTurnstileEnabled   = "turnstile_enabled"    // 是否启用 Turnstile 验证
 	SettingKeyTurnstileSiteKey   = "turnstile_site_key"   // Turnstile Site Key

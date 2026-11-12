@@ -102,7 +102,18 @@ type SMTPConfig struct {
 	From     string
 	FromName string
 	UseTLS   bool
+
+	// Provider 为空或 "smtp" 时走 SMTP；"cloudflare" 时走 Cloudflare Email Service REST API。
+	Provider    string
+	CFAccountID string
+	CFAPIToken  string
 }
+
+// 发信通道取值。
+const (
+	EmailProviderSMTP       = "smtp"
+	EmailProviderCloudflare = "cloudflare"
+)
 
 // EmailService 邮件服务
 type EmailService struct {
@@ -151,11 +162,38 @@ func (s *EmailService) GetSMTPConfig(ctx context.Context) (*SMTPConfig, error) {
 		SettingKeySMTPFrom,
 		SettingKeySMTPFromName,
 		SettingKeySMTPUseTLS,
+		SettingKeyEmailProvider,
+		SettingKeyCFAccountID,
+		SettingKeyCFAPIToken,
+		SettingKeyCFFrom,
 	}
 
 	settings, err := s.settingRepo.GetMultiple(ctx, keys)
 	if err != nil {
 		return nil, fmt.Errorf("get smtp settings: %w", err)
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(settings[SettingKeyEmailProvider]))
+	if provider == "" {
+		provider = EmailProviderSMTP
+	}
+	if provider == EmailProviderCloudflare {
+		accountID := strings.TrimSpace(settings[SettingKeyCFAccountID])
+		apiToken := strings.TrimSpace(settings[SettingKeyCFAPIToken])
+		from := strings.TrimSpace(settings[SettingKeyCFFrom])
+		if from == "" {
+			from = strings.TrimSpace(settings[SettingKeySMTPFrom])
+		}
+		if accountID == "" || apiToken == "" || from == "" {
+			return nil, ErrEmailNotConfigured
+		}
+		return &SMTPConfig{
+			Provider:    EmailProviderCloudflare,
+			CFAccountID: accountID,
+			CFAPIToken:  apiToken,
+			From:        from,
+			FromName:    strings.TrimSpace(settings[SettingKeySMTPFromName]),
+		}, nil
 	}
 
 	host := strings.TrimSpace(settings[SettingKeySMTPHost])
@@ -173,6 +211,7 @@ func (s *EmailService) GetSMTPConfig(ctx context.Context) (*SMTPConfig, error) {
 	useTLS := settings[SettingKeySMTPUseTLS] == "true"
 
 	return &SMTPConfig{
+		Provider: EmailProviderSMTP,
 		Host:     host,
 		Port:     port,
 		Username: strings.TrimSpace(settings[SettingKeySMTPUsername]),
@@ -197,6 +236,9 @@ const smtpIOTimeout = 20 * time.Second
 
 // SendEmailWithConfig 使用指定配置发送邮件
 func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body string) error {
+	if config != nil && config.Provider == EmailProviderCloudflare {
+		return s.sendWithCloudflare(config, to, subject, body)
+	}
 	message, err := buildSMTPMessage(config, to, subject, body)
 	if err != nil {
 		return err
