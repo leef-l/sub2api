@@ -9805,6 +9805,8 @@ type SettingsForm = Omit<
   | "wechat_connect_mobile_enabled"
   | "openai_oauth_scheduling_rate_multiplier"
 > & {
+  /** Write-only：仅在填写新 token 时提交，后端回显只给 configured 标记。 */
+  cf_api_token: string;
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
   channel_monitor_hide_throughput: boolean;
   channel_monitor_show_quota: boolean;
