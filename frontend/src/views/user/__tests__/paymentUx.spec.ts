@@ -58,13 +58,23 @@ describe('describePaymentScenarioError', () => {
     })
   })
 
-  it('maps generic desktop Alipay failures to QR guidance', () => {
+  it.each(['PAYMENT_GATEWAY_ERROR', 'UNHANDLED_PAYMENT_SCENARIO'])('maps desktop Alipay %s to gateway guidance without assuming QR payment', (reason) => {
     expect(describePaymentScenarioError(
-      { reason: 'PAYMENT_GATEWAY_ERROR' },
-      { paymentMethod: 'alipay', isMobile: false, isWechatBrowser: false },
+      { reason },
+      { paymentMethod: 'alipay_direct', isMobile: false, isWechatBrowser: false },
     )).toEqual({
       messageKey: 'payment.errors.alipayDesktopUnavailable',
-      hintKey: 'payment.errors.alipayDesktopQrHint',
+      hintKey: 'payment.errors.alipayDesktopGatewayHint',
+    })
+  })
+
+  it.each(['PAYMENT_GATEWAY_ERROR', 'UNHANDLED_PAYMENT_SCENARIO'])('keeps mobile Alipay %s guidance unchanged', (reason) => {
+    expect(describePaymentScenarioError(
+      { reason },
+      { paymentMethod: 'alipay', isMobile: true, isWechatBrowser: false },
+    )).toEqual({
+      messageKey: 'payment.errors.alipayMobileUnavailable',
+      hintKey: 'payment.errors.alipayMobileOpenHint',
     })
   })
 })

@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -21,6 +23,10 @@ const (
 	alipayProductCodePreCreate = "FACE_TO_FACE_PAYMENT"
 	alipayProductCodeWapPay    = "QUICK_WAP_WAY"
 	alipayProductCodePagePay   = "FAST_INSTANT_TRADE_PAY"
+
+	// Optional per-instance setting. Only affects newly created desktop orders;
+	// mobile routing, existing checkout URLs, and callback verification are unchanged.
+	alipayCfgDesktopWapPay = "desktopWapPay"
 )
 
 // Alipay response constants.
@@ -85,10 +91,107 @@ func NewAlipay(instanceID string, config map[string]string) (*Alipay, error) {
 			return nil, fmt.Errorf("alipay config missing required key: %s", k)
 		}
 	}
-	return &Alipay{
+	switch strings.ToLower(strings.TrimSpace(config[alipayCfgDesktopWapPay])) {
+	case "", "true", "false":
+	default:
+		return nil, infraerrors.BadRequest("INVALID_ALIPAY_DESKTOP_WAP_PAY", "desktopWapPay must be true or false")
+	}
+	a := &Alipay{
 		instanceID: instanceID,
 		config:     config,
-	}, nil
+	}
+	if err := a.validatePlatformPublicKey(); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// validatePlatformPublicKey rejects the merchant's own application public key in
+// the publicKey field. Alipay signs notifications with ITS private key, so the
+// configured key must be the Alipay public key; the app key can only ever verify
+// the merchant's own signatures. Every callback and TradeQuery would otherwise
+// fail with "crypto/rsa: verification error" while orders stay unpaid locally.
+//
+// Best-effort: unparseable keys and certificate mode are left to the SDK. This
+// runs at save time (constructor) so an admin sees the mistake immediately.
+func (a *Alipay) validatePlatformPublicKey() error {
+	if a.certModeConfigured() {
+		return nil
+	}
+	pubKey := strings.TrimSpace(a.config["publicKey"])
+	if pubKey == "" {
+		pubKey = strings.TrimSpace(a.config["alipayPublicKey"])
+	}
+	if pubKey == "" || strings.Contains(pubKey, "-----BEGIN CERTIFICATE-----") {
+		return nil
+	}
+	privKey := strings.TrimSpace(a.config["privateKey"])
+	if privKey == "" {
+		return nil
+	}
+	privateKey, err := parseAlipayRSAPrivateKey(privKey)
+	if err != nil {
+		return nil
+	}
+	publicKey, err := parseAlipayRSAPublicKey(pubKey)
+	if err != nil {
+		return nil
+	}
+	derived, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return nil
+	}
+	configured, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		return nil
+	}
+	if bytes.Equal(derived, configured) {
+		return infraerrors.BadRequest(
+			"ALIPAY_APP_PUBLIC_KEY_MISMATCH",
+			"publicKey 填的是应用公钥，请改为开放平台的支付宝公钥；填应用公钥会导致回调验签失败、支付无法入账",
+		)
+	}
+	return nil
+}
+
+func parseAlipayRSAPrivateKey(raw string) (*rsa.PrivateKey, error) {
+	normalized := raw
+	if !strings.Contains(normalized, "-----BEGIN") {
+		normalized = wrapBase64PEM(strings.Join(strings.Fields(normalized), ""), "PRIVATE KEY")
+	}
+	block, _ := pem.Decode([]byte(normalized))
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block")
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if rsaKey, ok := key.(*rsa.PrivateKey); ok {
+			return rsaKey, nil
+		}
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("unsupported private key format")
+}
+
+func parseAlipayRSAPublicKey(raw string) (*rsa.PublicKey, error) {
+	normalized := raw
+	if !strings.Contains(normalized, "-----BEGIN") {
+		normalized = wrapBase64PEM(strings.Join(strings.Fields(normalized), ""), "PUBLIC KEY")
+	}
+	block, _ := pem.Decode([]byte(normalized))
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block")
+	}
+	if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+		if rsaKey, ok := key.(*rsa.PublicKey); ok {
+			return rsaKey, nil
+		}
+	}
+	if key, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("unsupported public key format")
 }
 
 func (a *Alipay) getClient() (*alipay.Client, error) {
@@ -251,6 +354,9 @@ func (a *Alipay) MerchantIdentityMetadata() map[string]string {
 //   - Mobile (H5), default: alipay.trade.wap.pay — browser redirect into Alipay.
 //   - Mobile with AlipayMobilePrecreate: alipay.trade.precreate — return the
 //     dynamic QR payload so the frontend can open it through the Alipay app.
+//   - Desktop with desktopWapPay == "true": use alipay.trade.wap.pay, even when
+//     paymentMode is "redirect". Return only a checkout URL; its desktop browser
+//     presentation is controlled by Alipay. Never manufacture a QR from this URL.
 //   - Desktop, default: prefer alipay.trade.precreate (FACE_TO_FACE_PAYMENT) to
 //     get a scannable QR payload. If precreate is unavailable for the merchant,
 //     fall back to alipay.trade.page.pay and expose pay_url only — the frontend
@@ -293,6 +399,16 @@ func (a *Alipay) createWapTrade(client *alipay.Client, req payment.CreatePayment
 	param.ProductCode = alipayProductCodeWapPay
 	param.NotifyURL = notifyURL
 	param.ReturnURL = returnURL
+	// Keep the upstream checkout from outliving our local order, especially when
+	// the link is opened later from a scanned QR code.
+	if !req.ExpiresAt.IsZero() {
+		if minutes := int(time.Until(req.ExpiresAt).Minutes()); minutes > 0 {
+			if minutes > 1440 {
+				minutes = 1440
+			}
+			param.TimeoutExpress = strconv.Itoa(minutes) + "m"
+		}
+	}
 
 	payURL, err := alipayTradeWapPay(client, param)
 	if err != nil {
@@ -305,6 +421,12 @@ func (a *Alipay) createWapTrade(client *alipay.Client, req payment.CreatePayment
 }
 
 func (a *Alipay) createDesktopTrade(ctx context.Context, client *alipay.Client, req payment.CreatePaymentRequest, notifyURL, returnURL string) (*payment.CreatePaymentResponse, error) {
+	// Opt-in desktop WAP takes precedence over precreate and page.pay. Do not
+	// fall back to another product if WAP fails: the merchant explicitly chose it.
+	if strings.EqualFold(strings.TrimSpace(a.config[alipayCfgDesktopWapPay]), "true") {
+		return a.createWapTrade(client, req, notifyURL, returnURL)
+	}
+
 	// Explicit redirect mode: merchant opted into "always open the Alipay
 	// checkout page in a new tab" via the provider instance's payment_mode.
 	// Skip precreate to avoid a wasted API call.

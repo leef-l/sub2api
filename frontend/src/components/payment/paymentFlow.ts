@@ -49,6 +49,7 @@ export interface PaymentRecoverySnapshot {
   paymentMode: string
   resumeToken: string
   alipayMobilePrecreateDeepLink?: boolean
+  alipayDesktopCheckout?: boolean
   createdAt: number
 }
 
@@ -169,7 +170,14 @@ export function decidePaymentLaunch(
     paymentMode: (result.payment_mode || '').trim(),
     resumeToken: result.resume_token || '',
     alipayMobilePrecreateDeepLink: result.alipay_mobile_precreate_deep_link === true,
+    alipayDesktopCheckout: result.alipay_desktop_checkout === true,
   }, context.now)
+
+  if (visibleMethod === 'alipay' && baseState.alipayDesktopCheckout) {
+    // The QR points to our checkout, not a precreate code or an Alipay app deep link.
+    const paymentState = { ...baseState, paymentMode: 'qrcode', alipayMobilePrecreateDeepLink: false }
+    return { kind: baseState.qrCode ? 'qr_waiting' : 'unhandled', paymentState, recovery: paymentState }
+  }
 
   if (visibleMethod === 'airwallex' && baseState.clientSecret && baseState.intentId) {
     if (!context.airwallexRouteUrl) {
@@ -264,6 +272,17 @@ export function writePaymentRecoverySnapshot(
   storage.setItem(key, JSON.stringify(snapshot))
 }
 
+/** Checkout QR capabilities stay in tab-scoped session storage, never localStorage. */
+export function persistPaymentRecovery(
+  local: StorageWriter,
+  session: StorageWriter,
+  snapshot: PaymentRecoverySnapshot,
+): void {
+  clearPaymentRecoverySnapshot(local)
+  clearPaymentRecoverySnapshot(session)
+  writePaymentRecoverySnapshot(snapshot.alipayDesktopCheckout ? session : local, snapshot)
+}
+
 export function clearPaymentRecoverySnapshot(
   storage: Pick<Storage, 'removeItem'>,
   key = PAYMENT_RECOVERY_STORAGE_KEY,
@@ -296,6 +315,7 @@ export function readPaymentRecoverySnapshot(
       || typeof parsed.paymentMode !== 'string'
       || typeof parsed.resumeToken !== 'string'
       || (parsed.alipayMobilePrecreateDeepLink != null && typeof parsed.alipayMobilePrecreateDeepLink !== 'boolean')
+      || (parsed.alipayDesktopCheckout != null && typeof parsed.alipayDesktopCheckout !== 'boolean')
       || typeof parsed.createdAt !== 'number'
     ) {
       return null
@@ -327,7 +347,8 @@ export function readPaymentRecoverySnapshot(
       orderType: parsed.orderType === 'subscription' ? 'subscription' : 'balance',
       paymentMode: parsed.paymentMode,
       resumeToken: parsed.resumeToken,
-      alipayMobilePrecreateDeepLink: parsed.alipayMobilePrecreateDeepLink === true,
+      alipayMobilePrecreateDeepLink: parsed.alipayDesktopCheckout !== true && parsed.alipayMobilePrecreateDeepLink === true,
+      alipayDesktopCheckout: parsed.alipayDesktopCheckout === true,
       createdAt: parsed.createdAt,
     }
   } catch {

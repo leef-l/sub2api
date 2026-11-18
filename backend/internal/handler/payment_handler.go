@@ -456,6 +456,30 @@ type ResolveOrderByResumeTokenRequest struct {
 	ResumeToken string `json:"resume_token" binding:"required"`
 }
 
+// ResolvePaymentCheckoutRequest carries the fragment-scoped QR capability.
+type ResolvePaymentCheckoutRequest struct {
+	CheckoutToken string `json:"checkout_token" binding:"required"`
+}
+
+// ResolvePublicPaymentCheckout returns the minimal anonymous union of fields
+// needed by the scan checkout. The signed token replaces login for the scan.
+// POST /api/v1/payment/public/checkout/resolve
+func (h *PaymentHandler) ResolvePublicPaymentCheckout(c *gin.Context) {
+	var req ResolvePaymentCheckoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	result, err := h.paymentService.GetPublicPaymentCheckout(c.Request.Context(), req.CheckoutToken)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 // VerifyOrder actively queries the upstream payment provider to check
 // if payment was made, and processes it if so.
 // POST /api/v1/payment/orders/verify

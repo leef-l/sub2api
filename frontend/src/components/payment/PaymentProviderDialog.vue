@@ -42,8 +42,11 @@
               :key="mode.value"
               type="button"
               @click="form.payment_mode = mode.value"
+              :disabled="alipayDesktopWapPay"
+              :aria-pressed="form.payment_mode === mode.value"
+              :aria-describedby="alipayDesktopWapPay ? 'alipay-desktop-wap-mode-hint' : undefined"
               :class="[
-                'rounded-lg border px-2.5 py-1 text-xs font-medium transition-all',
+                'rounded-lg border px-2.5 py-1 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50',
                 form.payment_mode === mode.value
                   ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
                   : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-dark-500',
@@ -68,6 +71,21 @@
             >{{ pt.label }}</button>
           </div>
         </div>
+      </div>
+
+      <div v-if="form.provider_key === 'alipay'" class="space-y-2 rounded-lg border border-gray-100 p-3 dark:border-dark-700">
+        <ToggleSwitch
+          :label="t('admin.settings.payment.alipayDesktopWapPay')"
+          :checked="alipayDesktopWapPay"
+          aria-describedby="alipay-desktop-wap-hint"
+          @toggle="config.desktopWapPay = alipayDesktopWapPay ? 'false' : 'true'"
+        />
+        <p id="alipay-desktop-wap-hint" class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          {{ t('admin.settings.payment.alipayDesktopWapPayHint') }}
+        </p>
+        <p v-if="alipayDesktopWapPay" id="alipay-desktop-wap-mode-hint" class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          {{ t('admin.settings.payment.alipayDesktopWapPayModeHint') }}
+        </p>
       </div>
 
       <div v-if="supportsCustomMethods" class="space-y-3 rounded-lg border border-gray-100 p-3 dark:border-dark-700">
@@ -437,6 +455,9 @@ const callbackPaths = computed(() => PROVIDER_CALLBACK_PATHS[form.provider_key] 
 
 const supportsCustomMethods = computed(() => form.provider_key === 'easypay' || form.provider_key === 'bepusdt')
 const supportsPaymentMode = computed(() => providerSupportsPaymentMode(form.provider_key))
+const alipayDesktopWapPay = computed(() =>
+  form.provider_key === 'alipay' && config.desktopWapPay?.trim().toLowerCase() === 'true',
+)
 
 function paymentMethodLabel(type: string): string {
   const key = `payment.methods.${type}`
@@ -493,6 +514,7 @@ const paymentGuide = computed<PaymentGuide | null>(() => {
   if (form.provider_key === 'alipay') {
     return {
       summary: t('admin.settings.payment.alipayGuideSummary'),
+      note: t('admin.settings.payment.alipayDesktopWapPayHint'),
       items: [
         {
           title: t('admin.settings.payment.alipayGuideFaceToFaceTitle'),
@@ -622,6 +644,9 @@ function applyDefaults() {
   for (const f of PROVIDER_CONFIG_FIELDS[form.provider_key] || []) {
     if (f.defaultValue && !config[f.key]) config[f.key] = f.defaultValue
   }
+  if (form.provider_key === 'alipay') {
+    config.desktopWapPay = alipayDesktopWapPay.value ? 'true' : 'false'
+  }
 }
 
 function getLimitVal(paymentType: string, field: string): string {
@@ -716,6 +741,10 @@ function handleSave() {
   }
   if (supportsCustomMethods.value) {
     filteredConfig.customMethods = serializeEasyPayCustomMethods(normalizedEasyPayCustomMethods())
+  }
+  if (form.provider_key === 'alipay') {
+    // Explicit false must reach the backend merge to clear a previously enabled override.
+    filteredConfig.desktopWapPay = alipayDesktopWapPay.value ? 'true' : 'false'
   }
 
   // Inject computed callback URLs (each URL = independent base + fixed path)

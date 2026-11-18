@@ -114,6 +114,9 @@ type CreatePaymentRequest struct {
 	OpenID      string // WeChat JSAPI payer OpenID when available
 	ClientIP    string // Payer's IP address
 	IsMobile    bool   // Whether the request comes from a mobile device
+	// ExpiresAt bounds how long the upstream checkout stays payable, when the
+	// provider supports an absolute/relative expiry parameter.
+	ExpiresAt time.Time
 	// AlipayMobilePrecreate routes a mobile Alipay request through
 	// alipay.trade.precreate instead of alipay.trade.wap.pay.
 	AlipayMobilePrecreate bool

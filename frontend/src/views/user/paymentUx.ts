@@ -40,7 +40,7 @@ function defaultWechatHint(context: PaymentScenarioContext): string {
 
 function defaultAlipayHint(context: PaymentScenarioContext): string {
   if (context.isMobile) return 'payment.errors.alipayMobileOpenHint'
-  return 'payment.errors.alipayDesktopQrHint'
+  return 'payment.errors.alipayDesktopGatewayHint'
 }
 
 export function describePaymentScenarioError(

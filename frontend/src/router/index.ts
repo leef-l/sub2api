@@ -362,6 +362,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/payment/checkout',
+    name: 'PaymentCheckout',
+    component: () => import('@/views/public/PaymentCheckoutView.vue'),
+    meta: {
+      requiresAuth: false,
+      requiresAdmin: false,
+      title: 'Payment Checkout',
+      titleKey: 'payment.checkout.title',
+      requiresPayment: false,
+    },
+  },
+  {
     path: '/payment/result',
     name: 'PaymentResult',
     component: () => import('@/views/user/PaymentResultView.vue'),
@@ -774,7 +786,7 @@ let authInitialized = false
 const navigationLoading = useNavigationLoadingState()
 // 延迟初始化预加载，传入 router 实例
 let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
-const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
+const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/checkout', '/payment/airwallex', '/legal']
 const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/callback',
   '/auth/linuxdo/callback',

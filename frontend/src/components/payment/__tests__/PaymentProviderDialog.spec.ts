@@ -15,7 +15,12 @@ const messages: Record<string, string> = {
   'admin.settings.payment.customMethodDisplayName': 'Display name',
   'admin.settings.payment.customMethodDisplayNamePlaceholder': '信用卡',
   'admin.settings.payment.paymentGuideTrigger': 'View payment guide',
-  'admin.settings.payment.alipayGuideSummary': 'Desktop prefers QR precreate and falls back to cashier; mobile prefers WAP checkout.',
+  'admin.settings.payment.alipayGuideSummary': 'Desktop WAP can override QR/redirect; mobile keeps its existing flow.',
+  'admin.settings.payment.alipayDesktopWapPay': 'Use WAP payment on desktop',
+  'admin.settings.payment.alipayDesktopWapPayHint': 'Only new desktop orders use WAP ahead of QR/redirect; mobile stays unchanged. Checkout depends on Alipay compatibility.',
+  'admin.settings.payment.alipayDesktopWapPayModeHint': 'Payment mode is kept and restored when desktop WAP is off.',
+  'admin.settings.payment.modeQRCode': 'QR Code',
+  'admin.settings.payment.modeRedirect': 'Redirect',
   'admin.settings.payment.wxpayGuideSummary': 'Desktop prefers Native QR; mobile routes to JSAPI or H5 based on browser context.',
   'admin.settings.payment.airwallexGuideSummary': 'Use Payment Acceptance read/write only.',
   'admin.settings.payment.stripeWebhookHint': 'Configure Stripe webhook.',
@@ -33,6 +38,7 @@ vi.mock('vue-i18n', () => ({
         message,
       )
     },
+    te: (key: string) => key in messages,
   }),
 }))
 
@@ -61,6 +67,7 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
       editing: options.editing ?? null,
       allKeyOptions: [
         { value: 'easypay', label: 'EasyPay' },
+        { value: 'bepusdt', label: 'BEpusdt' },
         { value: 'alipay', label: 'Alipay' },
         { value: 'wxpay', label: 'WeChat Pay' },
         { value: 'stripe', label: 'Stripe' },
@@ -68,6 +75,7 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
       ],
       enabledKeyOptions: [
         { value: 'easypay', label: 'EasyPay' },
+        { value: 'bepusdt', label: 'BEpusdt' },
         { value: 'alipay', label: 'Alipay' },
         { value: 'wxpay', label: 'WeChat Pay' },
         { value: 'airwallex', label: 'Airwallex' },
@@ -86,9 +94,6 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
         Select: {
           name: 'Select',
           props: ['modelValue', 'options', 'disabled'],
-          template: '<div />',
-        },
-        ToggleSwitch: {
           template: '<div />',
         },
       },
@@ -146,6 +151,192 @@ describe('PaymentProviderDialog EasyPay refund protocol', () => {
 
     const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
     expect(payload.config.refundSuccessCode).toBe(selectedCode)
+    wrapper.unmount()
+  })
+})
+
+describe('PaymentProviderDialog desktop Alipay WAP', () => {
+  const wapSwitchSelector = 'button[role="switch"][aria-label="Use WAP payment on desktop"]'
+
+  function loadProvider(wrapper: ReturnType<typeof mountDialog>, provider: ProviderInstance) {
+    (wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+  }
+
+  function resetProvider(wrapper: ReturnType<typeof mountDialog>, key: string) {
+    (wrapper.vm as unknown as { reset: (key: string) => void }).reset(key)
+  }
+
+  it.each([
+    [undefined, 'false'],
+    ['', 'false'],
+    ['false', 'false'],
+    ['true', 'true'],
+    [' TRUE ', 'true'],
+  ])('loads %s and saves the explicit boolean string %s', async (storedValue, expectedValue) => {
+    const provider = providerFactory({
+      provider_key: 'alipay', name: 'Alipay', supported_types: ['alipay'], payment_mode: 'redirect',
+      config: { appId: 'app-1', ...(storedValue === undefined ? {} : { desktopWapPay: storedValue }) },
+    })
+    const wrapper = mountDialog({ editing: provider })
+    loadProvider(wrapper, provider)
+    await nextTick()
+
+    const toggle = wrapper.get(wapSwitchSelector)
+    expect(toggle.attributes('aria-checked')).toBe(expectedValue)
+    expect(toggle.attributes('aria-describedby')).toBe('alipay-desktop-wap-hint')
+    expect(wrapper.get('#alipay-desktop-wap-hint').text()).toBe(messages['admin.settings.payment.alipayDesktopWapPayHint'])
+    await wrapper.get('form').trigger('submit')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string>; payment_mode: string }
+    expect(payload.config.desktopWapPay).toBe(expectedValue)
+    expect(payload.payment_mode).toBe('redirect')
+    wrapper.unmount()
+  })
+
+  it.each(['', 'redirect'])('saves true then false and preserves the previous PC mode %s', async (paymentMode) => {
+    const provider = providerFactory({
+      provider_key: 'alipay', name: 'Alipay', supported_types: ['alipay'], payment_mode: paymentMode,
+      config: {
+        appId: 'app-1', desktopWapPay: 'false',
+        appCertPublicKey: 'fixture-app-cert', alipayPublicCert: 'fixture-alipay-cert', alipayRootCert: 'fixture-root-cert',
+      },
+    })
+    const wrapper = mountDialog({ editing: provider })
+    loadProvider(wrapper, provider)
+    await nextTick()
+    const modeButtons = wrapper.findAll('button[aria-pressed]')
+    const selectedMode = paymentMode === 'redirect' ? 'Redirect' : 'QR Code'
+    expect(modeButtons).toHaveLength(2)
+    expect(wrapper.get('button[aria-pressed="true"]').text()).toBe(selectedMode)
+
+    await wrapper.get(wapSwitchSelector).trigger('click')
+    expect(modeButtons.every(button => (button.element as HTMLButtonElement).disabled)).toBe(true)
+    expect(modeButtons.every(button => button.attributes('aria-describedby') === 'alipay-desktop-wap-mode-hint')).toBe(true)
+    expect(wrapper.get('#alipay-desktop-wap-mode-hint').text()).toBe(messages['admin.settings.payment.alipayDesktopWapPayModeHint'])
+    await modeButtons.find(button => button.text() !== selectedMode)!.trigger('click')
+    expect(wrapper.get('button[aria-pressed="true"]').text()).toBe(selectedMode)
+    await wrapper.get('form').trigger('submit')
+
+    const enabledPayload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string>; payment_mode: string }
+    expect(enabledPayload.config).toMatchObject({ ...provider.config, desktopWapPay: 'true' })
+    expect(enabledPayload.payment_mode).toBe(paymentMode)
+
+    await wrapper.get(wapSwitchSelector).trigger('click')
+    expect(modeButtons.every(button => !(button.element as HTMLButtonElement).disabled)).toBe(true)
+    expect(wrapper.find('#alipay-desktop-wap-mode-hint').exists()).toBe(false)
+    expect(wrapper.get('button[aria-pressed="true"]').text()).toBe(selectedMode)
+    await wrapper.get('form').trigger('submit')
+
+    const disabledPayload = wrapper.emitted('save')?.[1]?.[0] as { config: Record<string, string>; payment_mode: string }
+    expect(disabledPayload.config.desktopWapPay).toBe('false')
+    expect(disabledPayload.payment_mode).toBe(paymentMode)
+    wrapper.unmount()
+  })
+
+  it('defaults a new provider to false and resets an enabled edit without leaking its config', async () => {
+    const provider = providerFactory({
+      provider_key: 'alipay', name: 'Alipay', supported_types: ['alipay'], payment_mode: 'redirect',
+      config: { appId: 'old-app', desktopWapPay: 'true', alipayRootCert: 'old-cert' },
+    })
+    const wrapper = mountDialog({ editing: provider })
+    loadProvider(wrapper, provider)
+    await nextTick()
+    expect(wrapper.get(wapSwitchSelector).attributes('aria-checked')).toBe('true')
+
+    await wrapper.setProps({ editing: null })
+    resetProvider(wrapper, 'alipay')
+    await nextTick()
+    expect(wrapper.get(wapSwitchSelector).attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('button[aria-pressed="true"]').text()).toBe('QR Code')
+    const textInputs = wrapper.findAll('input[type="text"]')
+    expect((textInputs[0].element as HTMLInputElement).value).toBe('')
+    expect((textInputs[1].element as HTMLInputElement).value).toBe('')
+    await textInputs[0].setValue('New Alipay')
+    await textInputs[1].setValue('new-app')
+    await wrapper.findAll('textarea')[0].setValue('fixture-private-key')
+    await wrapper.get('form').trigger('submit')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string>; payment_mode: string }
+    expect(payload.config.desktopWapPay).toBe('false')
+    expect(payload.config.appId).toBe('new-app')
+    expect(payload.config.alipayRootCert).toBeUndefined()
+    expect(payload.payment_mode).toBe('')
+    wrapper.unmount()
+  })
+
+  it('clears the override on provider-type changes and preserves BEpusdt custom channels', async () => {
+    const wrapper = mountDialog()
+    resetProvider(wrapper, 'alipay')
+    await nextTick()
+    await wrapper.get(wapSwitchSelector).trigger('click')
+    const selector = wrapper.findComponent({ name: 'Select' })
+
+    selector.vm.$emit('update:modelValue', 'bepusdt')
+    selector.vm.$emit('change', 'bepusdt')
+    await nextTick()
+    expect(wrapper.find(wapSwitchSelector).exists()).toBe(false)
+    expect(wrapper.get('button[aria-pressed="true"]').text()).toBe('Redirect')
+    const providerInputs = wrapper.findAll('input[type="text"]')
+    await providerInputs[0].setValue('BEpusdt')
+    await providerInputs[1].setValue('fixture-pid')
+    await providerInputs[2].setValue('https://pay.example.com')
+    await wrapper.get('input[type="password"]').setValue('fixture-key')
+    await wrapper.get('button.btn-sm').trigger('click')
+    const methodInputs = wrapper.findAll('input[placeholder="usdt_trc20"]')
+    await methodInputs[0].setValue('usdt_trc20')
+    await methodInputs[1].setValue('usdt.trc20')
+    await wrapper.get('input[placeholder="信用卡"]').setValue('USDT')
+    await wrapper.get('form').trigger('submit')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as {
+      config: Record<string, string>; supported_types: string[]; payment_mode: string
+    }
+    expect(payload.config.desktopWapPay).toBeUndefined()
+    expect(payload.config.currency).toBe('USD')
+    expect(payload.payment_mode).toBe('redirect')
+    expect(payload.supported_types).toEqual(['usdt_trc20'])
+    expect(JSON.parse(payload.config.customMethods)).toEqual([
+      { type: 'usdt_trc20', upstreamType: 'usdt.trc20', displayName: 'USDT' },
+    ])
+
+    selector.vm.$emit('update:modelValue', 'alipay')
+    selector.vm.$emit('change', 'alipay')
+    await nextTick()
+    expect(wrapper.get(wapSwitchSelector).attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('button[aria-pressed="true"]').text()).toBe('QR Code')
+    wrapper.unmount()
+  })
+
+  it('does not leak an enabled override when loading another provider instance', async () => {
+    const enabled = providerFactory({
+      provider_key: 'alipay', name: 'Alipay 1', supported_types: ['alipay'],
+      config: { appId: 'app-1', desktopWapPay: 'true' },
+    })
+    const legacy = providerFactory({
+      id: 2, provider_key: 'alipay', name: 'Alipay 2', supported_types: ['alipay'],
+      config: { appId: 'app-2' },
+    })
+    const wrapper = mountDialog({ editing: enabled })
+    loadProvider(wrapper, enabled)
+    await nextTick()
+    expect(wrapper.get(wapSwitchSelector).attributes('aria-checked')).toBe('true')
+    await wrapper.setProps({ editing: legacy })
+    loadProvider(wrapper, legacy)
+    await nextTick()
+    expect(wrapper.get(wapSwitchSelector).attributes('aria-checked')).toBe('false')
+    await wrapper.get('form').trigger('submit')
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
+    expect(payload.config.desktopWapPay).toBe('false')
+    expect(payload.config.appId).toBe('app-2')
+    wrapper.unmount()
+  })
+
+  it.each(['easypay', 'bepusdt', 'wxpay', 'stripe', 'airwallex'])('hides the Alipay-only switch for %s', async (key) => {
+    const wrapper = mountDialog()
+    resetProvider(wrapper, key)
+    await nextTick()
+    expect(wrapper.find(wapSwitchSelector).exists()).toBe(false)
+    expect(wrapper.find('#alipay-desktop-wap-hint').exists()).toBe(false)
     wrapper.unmount()
   })
 })

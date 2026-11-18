@@ -308,6 +308,11 @@ func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req Creat
 		if merchantAppID := strings.TrimSpace(sel.Config["appId"]); merchantAppID != "" {
 			snapshot["merchant_app_id"] = merchantAppID
 		}
+		// Durable marker: this order's QR capability may only resolve while the
+		// same stored order and merchant remain payable.
+		if shouldUseAlipayDesktopCheckout(req, sel) {
+			snapshot["alipay_desktop_checkout"] = true
+		}
 	}
 	if providerKey == payment.TypeEasyPay || providerKey == payment.TypeBepusdt {
 		if merchantID := strings.TrimSpace(sel.Config["pid"]); merchantID != "" {
@@ -465,6 +470,7 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 		ReturnURL:   providerReturnURL,
 	}, sel, outTradeNo, payAmountStr, subject)
 	providerReq.AlipayMobilePrecreate = shouldUseAlipayMobilePrecreate(req, cfg, sel)
+	providerReq.ExpiresAt = order.ExpiresAt
 	finishProviderCall := servertiming.ObserveDependency(ctx, "payment")
 	pr, err := prov.CreatePayment(ctx, providerReq)
 	finishProviderCall()
@@ -476,6 +482,18 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 		return nil, classifyCreatePaymentError(req, sel.ProviderKey, err)
 	}
 	sanitizeCreatePaymentResponseDetails(pr)
+	desktopCheckout := shouldUseAlipayDesktopCheckout(req, sel)
+	if desktopCheckout && strings.TrimSpace(pr.PayURL) != "" {
+		// Scan straight into Alipay's own checkout. A same-site interstitial made
+		// Alipay show a "leaving Alipay" warning and cost an extra tap, so the QR
+		// carries the signed Alipay WAP URL after validating merchant/order/amount.
+		if err := validateAlipayCheckoutPayURL(pr.PayURL, order, strings.TrimSpace(sel.Config["appId"])); err != nil {
+			slog.Error("[PaymentService] invalid Alipay desktop checkout URL", "orderID", order.ID, "error", err)
+			_, _ = s.entClient.PaymentOrder.UpdateOneID(order.ID).SetStatus(OrderStatusFailed).Save(ctx)
+			return nil, classifyCreatePaymentError(req, sel.ProviderKey, err)
+		}
+		pr.QRCode = pr.PayURL
+	}
 	_, err = s.entClient.PaymentOrder.UpdateOneID(order.ID).
 		SetNillablePaymentTradeNo(psNilIfEmpty(pr.TradeNo)).
 		SetNillablePayURL(psNilIfEmpty(pr.PayURL)).
@@ -502,6 +520,11 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 	resp := buildCreateOrderResponse(order, req, payAmount, sel, pr, resultType)
 	resp.ResumeToken = resumeToken
 	resp.AlipayMobilePrecreateDeepLink = providerReq.AlipayMobilePrecreate && strings.TrimSpace(pr.QRCode) != ""
+	resp.AlipayDesktopCheckout = desktopCheckout && strings.TrimSpace(pr.QRCode) != ""
+	if resp.AlipayDesktopCheckout {
+		// The QR is a same-site checkout capability, not a desktop popup URL.
+		resp.PaymentMode = "qrcode"
+	}
 	return resp, nil
 }
 

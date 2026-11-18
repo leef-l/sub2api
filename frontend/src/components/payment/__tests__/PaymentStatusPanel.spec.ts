@@ -132,6 +132,67 @@ describe('PaymentStatusPanel', () => {
     openSpy.mockRestore()
   })
 
+  it('keeps the desktop WAP reopen button usable with only a payUrl', async () => {
+    const payUrl = 'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay'
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue({ closed: false } as Window)
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: '',
+        payUrl,
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'alipay',
+        orderType: 'balance',
+      },
+      global: { stubs: { Icon: true } },
+    })
+
+    try {
+      await flushPromises()
+      expect(wrapper.find('canvas').exists()).toBe(false)
+      expect(toCanvas).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('payment.qr.payInNewWindowHint')
+      expect(wrapper.text()).not.toContain('payment.qr.scanAlipay')
+      const reopenButton = wrapper.get('button.btn.btn-secondary.text-sm')
+      expect((reopenButton.element as HTMLButtonElement).disabled).toBe(false)
+      await reopenButton.trigger('click')
+      expect(openSpy).toHaveBeenCalledWith(payUrl, 'paymentPopup', expect.any(String))
+    } finally {
+      wrapper.unmount()
+      openSpy.mockRestore()
+    }
+  })
+
+  it('falls back to the desktop WAP payUrl when the reopen popup is blocked', async () => {
+    const payUrl = 'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay'
+    const originalLocation = window.location
+    const location = { href: 'https://app.example.com/payment' }
+    Object.defineProperty(window, 'location', { configurable: true, value: location })
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: '',
+        payUrl,
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'alipay',
+        orderType: 'balance',
+      },
+      global: { stubs: { Icon: true } },
+    })
+
+    try {
+      await flushPromises()
+      await wrapper.get('button.btn.btn-secondary.text-sm').trigger('click')
+      expect(openSpy).toHaveBeenCalledWith(payUrl, 'paymentPopup', expect.any(String))
+      expect(location.href).toBe(payUrl)
+    } finally {
+      wrapper.unmount()
+      openSpy.mockRestore()
+      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation })
+    }
+  })
+
   it('uses generic QR copy for custom methods that contain built-in names', async () => {
     const wrapper = mount(PaymentStatusPanel, {
       props: {

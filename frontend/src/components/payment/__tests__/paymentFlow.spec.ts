@@ -160,6 +160,45 @@ describe('decidePaymentLaunch', () => {
     expect(decision.recovery.resumeToken).toBe('resume-2')
   })
 
+  it.each([undefined, '', 'qrcode', 'redirect', 'popup'])('keeps desktop Alipay pay_url-only orders redirectable with payment_mode %s', (paymentMode) => {
+    const payUrl = 'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay&out_trade_no=sub2_101'
+    const decision = decidePaymentLaunch(createOrderResult({
+      pay_url: payUrl,
+      payment_mode: paymentMode,
+      resume_token: 'resume-wap-101',
+      out_trade_no: 'sub2_101',
+    }), {
+      visibleMethod: 'alipay_direct',
+      orderType: 'balance',
+      isMobile: false,
+      forceQRCode: true,
+    })
+
+    expect(decision.kind).toBe('redirect_waiting')
+    expect(decision.paymentState.qrCode).toBe('')
+    expect(decision.paymentState.payUrl).toBe(payUrl)
+    expect(decision.paymentState.paymentType).toBe('alipay')
+    const restored = readPaymentRecoverySnapshot(JSON.stringify(decision.recovery), {
+      resumeToken: 'resume-wap-101',
+    })
+    expect(restored?.payUrl).toBe(payUrl)
+    expect(restored?.qrCode).toBe('')
+    expect(restored?.outTradeNo).toBe('sub2_101')
+  })
+
+  it('keeps the existing mobile Alipay WAP pay_url-only redirect flow', () => {
+    const decision = decidePaymentLaunch(createOrderResult({
+      pay_url: 'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay',
+    }), {
+      visibleMethod: 'alipay',
+      orderType: 'balance',
+      isMobile: true,
+    })
+
+    expect(decision.kind).toBe('redirect_waiting')
+    expect(decision.paymentState.qrCode).toBe('')
+  })
+
   it('prefers redirect on mobile when both pay_url and qr_code are present', () => {
     const decision = decidePaymentLaunch(createOrderResult({
       pay_url: 'https://pay.example.com/mobile/session',

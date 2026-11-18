@@ -20,6 +20,12 @@ import (
 const (
 	publicOrderVerifyRateLimit       = 20
 	publicOrderVerifyRateLimitWindow = time.Minute
+
+	// The scan checkout polls once every 5 seconds and may retry after a
+	// transient failure; 60/min keeps several tabs working without turning
+	// the signed capability into an enumerable endpoint.
+	publicCheckoutResolveRateLimit       = 60
+	publicCheckoutResolveRateLimitWindow = time.Minute
 )
 
 // RegisterPaymentRoutes registers all payment-related routes:
@@ -74,6 +80,11 @@ func RegisterPaymentRoutes(
 			publicRateLimiter.Limit("payment-public-order-verify", publicOrderVerifyRateLimit, publicOrderVerifyRateLimitWindow),
 			paymentHandler.VerifyOrderPublic)
 		public.POST("/orders/resolve", paymentHandler.ResolveOrderPublicByResumeToken)
+		// The scan checkout polls a few times per minute; the cap still makes
+		// guessing a 256-bit signed capability impractical.
+		public.POST("/checkout/resolve",
+			publicRateLimiter.Limit("payment-public-checkout-resolve", publicCheckoutResolveRateLimit, publicCheckoutResolveRateLimitWindow),
+			paymentHandler.ResolvePublicPaymentCheckout)
 	}
 
 	// --- Webhook endpoints (no auth) ---

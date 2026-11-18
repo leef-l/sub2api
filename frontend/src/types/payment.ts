@@ -232,9 +232,23 @@ export interface CreateOrderResult {
   payment_mode?: string
   resume_token?: string
   alipay_mobile_precreate_deep_link?: boolean
+  /** Same-site QR checkout which hands the existing order to mobile Alipay WAP. */
+  alipay_desktop_checkout?: boolean
   oauth?: WechatOAuthInfo
   jsapi?: WechatJSAPIPayload
   jsapi_payload?: WechatJSAPIPayload
+}
+
+/** Minimal anonymous response; amounts are gateway charges, not credited USD. */
+export interface PublicCheckoutResult {
+  order_id: number
+  out_trade_no: string
+  pay_amount: number
+  currency: string
+  status: string
+  expires_at: string
+  can_pay: boolean
+  pay_url?: string
 }
 
 export type CurrencyAmounts = Record<string, number>

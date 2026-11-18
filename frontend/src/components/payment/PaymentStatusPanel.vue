@@ -175,6 +175,18 @@
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4">
           <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ scanTitle }}</p>
+          <div v-if="isDesktopCheckout" class="w-full space-y-2 border-y border-gray-100 py-3 text-sm dark:border-dark-600">
+            <div class="flex items-start justify-between gap-4">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
+              <span class="font-semibold text-gray-900 dark:text-white">{{ displayPaymentAmount }}</span>
+            </div>
+            <div class="flex items-start justify-between gap-4">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderNo') }}</span>
+              <span class="max-w-[70%] break-all text-right font-mono text-xs text-gray-900 dark:text-white">
+                {{ displayOrderNumber }}
+              </span>
+            </div>
+          </div>
           <div :class="['relative rounded-lg border-2 p-4', qrBorderClass]">
             <canvas ref="qrCanvas" class="mx-auto"></canvas>
             <!-- Brand logo overlay -->
@@ -184,8 +196,11 @@
               </span>
             </div>
           </div>
-          <p v-if="scanHint" class="text-center text-sm text-gray-500 dark:text-gray-400">{{ scanHint }}</p>
-          <button v-if="payUrl" class="btn btn-secondary text-sm" @click="reopenPopup">
+          <p v-if="scanHint" class="text-center text-sm leading-6 text-gray-500 dark:text-gray-400">{{ scanHint }}</p>
+          <p v-if="isDesktopCheckout" class="text-center text-xs leading-5 text-gray-400 dark:text-gray-500">
+            {{ t('payment.checkout.desktopScanSafety') }}
+          </p>
+          <button v-if="payUrl && !isDesktopCheckout" class="btn btn-secondary text-sm" @click="reopenPopup">
             {{ t('payment.qr.openPayWindow') }}
           </button>
         </div>
@@ -255,6 +270,8 @@ const props = defineProps<{
   currency?: string
   outTradeNo?: string
   mobileAlipayDeepLink?: boolean
+  /** Desktop QR encodes our own checkout page and hands the order to mobile Alipay WAP. */
+  alipayDesktopCheckout?: boolean
 }>()
 
 type PaymentOutcome = 'success' | 'cancelled' | 'expired'
@@ -298,7 +315,8 @@ const VERIFY_RETRY_MAX_ATTEMPTS = 6
 
 const isAlipay = computed(() => isBuiltInAlipayMethod(props.paymentType))
 const isWxpay = computed(() => isBuiltInWxpayMethod(props.paymentType))
-const isMobileAlipayDeepLink = computed(() => props.mobileAlipayDeepLink === true && isAlipay.value && !!qrUrl.value)
+const isDesktopCheckout = computed(() => props.alipayDesktopCheckout === true && isAlipay.value && !!qrUrl.value)
+const isMobileAlipayDeepLink = computed(() => props.mobileAlipayDeepLink === true && !isDesktopCheckout.value && isAlipay.value && !!qrUrl.value)
 const showQRCode = computed(() => !!qrUrl.value && (!isMobileAlipayDeepLink.value || deepLinkFallbackVisible.value))
 
 const qrBorderClass = computed(() => {
@@ -326,6 +344,7 @@ const scanTitle = computed(() => {
 })
 
 const scanHint = computed(() => {
+  if (isDesktopCheckout.value) return t('payment.checkout.desktopScanHint')
   if (isAlipay.value) return t('payment.qr.scanAlipayHint')
   if (isWxpay.value) return t('payment.qr.scanWxpayHint')
   return ''

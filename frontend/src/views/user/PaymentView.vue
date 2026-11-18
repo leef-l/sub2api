@@ -26,6 +26,7 @@
             :currency="paymentState.currency || selectedCurrency"
             :out-trade-no="paymentState.outTradeNo"
             :mobile-alipay-deep-link="paymentState.alipayMobilePrecreateDeepLink"
+            :alipay-desktop-checkout="paymentState.alipayDesktopCheckout"
             @done="onPaymentDone"
             @success="onPaymentSuccess"
             @settled="onPaymentSettled"
@@ -309,7 +310,7 @@ import {
   normalizeVisibleMethod,
   readPaymentRecoverySnapshot,
   type PaymentRecoverySnapshot,
-  writePaymentRecoverySnapshot,
+  persistPaymentRecovery,
 } from '@/components/payment/paymentFlow'
 import { platformAccentBarClass, platformBadgeLightClass, platformBadgeClass, platformTextClass, platformLabel } from '@/utils/platformColors'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
@@ -436,12 +437,14 @@ const paymentState = ref<PaymentRecoverySnapshot>(emptyPaymentState())
 
 function persistRecoverySnapshot(snapshot: PaymentRecoverySnapshot) {
   if (typeof window === 'undefined' || !snapshot.orderId) return
-  writePaymentRecoverySnapshot(window.localStorage, snapshot, PAYMENT_RECOVERY_STORAGE_KEY)
+  // Desktop Alipay checkout QR embeds a bearer token, so keep it tab-scoped.
+  persistPaymentRecovery(window.localStorage, window.sessionStorage, snapshot)
 }
 
 function removeRecoverySnapshot() {
   if (typeof window === 'undefined') return
   clearPaymentRecoverySnapshot(window.localStorage, PAYMENT_RECOVERY_STORAGE_KEY)
+  clearPaymentRecoverySnapshot(window.sessionStorage, PAYMENT_RECOVERY_STORAGE_KEY)
 }
 
 function resetPayment() {
@@ -1190,7 +1193,7 @@ onMounted(async () => {
           ? route.query.wechat_resume_token
           : undefined
       const restored = readPaymentRecoverySnapshot(
-        window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY),
+        window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY) || window.sessionStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY),
         { resumeToken: routeResumeToken },
       )
       if (restored) {
